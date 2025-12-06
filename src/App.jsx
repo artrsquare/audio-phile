@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+// --- FIREBASE IMPORTS ---
+import { db } from './firebase'; 
+import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
   Home, Search, Library, Download, Heart, 
@@ -162,28 +166,6 @@ const FORMAT_DETAILS = {
 
 // --- COMPONENTS ---
 
-// MobileNav Component (Defined outside App to prevent re-render loop)
-const MobileNav = ({ currentView, setCurrentView, setRequestModalOpen, setUploadModalOpen, isAdmin }) => (
-  <div className="fixed bottom-0 left-0 right-0 h-16 bg-[#121212]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around z-50 md:hidden pb-safe">
-    <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center gap-1 ${currentView === 'home' ? 'text-white' : 'text-zinc-500'}`}>
-      <Home size={20} />
-      <span className="text-[10px] font-medium">Home</span>
-    </button>
-    <button onClick={() => setCurrentView('home')} className="flex flex-col items-center gap-1 text-zinc-500">
-      <Library size={20} />
-      <span className="text-[10px] font-medium">Library</span>
-    </button>
-    <button onClick={() => setRequestModalOpen(true)} className="flex flex-col items-center gap-1 text-zinc-500">
-      <MessageSquarePlus size={20} />
-      <span className="text-[10px] font-medium">Request</span>
-    </button>
-    <button onClick={() => setUploadModalOpen(true)} className={`flex flex-col items-center gap-1 ${isAdmin ? 'text-emerald-500' : 'text-zinc-500'}`}>
-      <User size={20} />
-      <span className="text-[10px] font-medium">{isAdmin ? 'Admin' : 'Login'}</span>
-    </button>
-  </div>
-);
-
 const RequestModal = ({ isOpen, onClose, onRequest }) => {
   if (!isOpen) return null;
 
@@ -286,7 +268,7 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
           <div className="space-y-2">
             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Additional Notes</label>
             <textarea 
-              className="w-full bg-white/5 border border-white/5 rounded-xl p-3 text-white placeholder:text-zinc-600 focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 focus:outline-none transition-all resize-none h-20"
+              className="w-full bg-white/5 border border-white/5 rounded-xl p-3 text-white placeholder:text-zinc-600 focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 focus:outline-none transition-all resize-none h-24"
               placeholder="Specific version, release year, or anything else..."
               value={formData.notes}
               onChange={e => setFormData({...formData, notes: e.target.value})}
@@ -544,7 +526,17 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState(0); 
-  const [requests, setRequests] = useState([]); // New state for requests
+  const [requests, setRequests] = useState([]); 
+
+  // --- DATABASE SYNC: Load requests from Firestore on mount ---
+  useEffect(() => {
+    // FIREBASE SYNC:
+    const unsubscribe = onSnapshot(collection(db, "requests"), (snapshot) => {
+       const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+       setRequests(reqs);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null);
@@ -605,18 +597,30 @@ export default function App() {
   const performDownload = (format) => { const id = Date.now(); setNotifications(prev => [...prev, { id, title: `Opening Download...`, subtitle: `${format} • Checking Link`, status: 'success' }]); setDownloadModalData(null); setTimeout(() => { setNotifications(prev => prev.filter(n => n.id !== id)); }, 4000); };
   const handleUpload = (newAlbum) => { setAlbums(prev => [newAlbum, ...prev]); const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Release Published", subtitle: `${newAlbum.title} is live`, status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); };
   
-  // Updated: store request in state
-  const handleRequestSong = (data) => { 
-    setRequests(prev => [...prev, { id: Date.now(), ...data }]);
-    const id = Date.now(); 
-    setNotifications(prev => [...prev, { id, title: "Request Received", subtitle: `We'll find "${data.title}"`, status: 'success' }]); 
-    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); 
+  // Updated: Handle Request with Firestore logic
+  const handleRequestSong = async (data) => { 
+    try {
+      await addDoc(collection(db, "requests"), {
+        ...data,
+        timestamp: new Date()
+      });
+      const id = Date.now();
+      setNotifications(prev => [...prev, { id, title: "Request Sent", subtitle: "Saved to database!", status: 'success' }]);
+      setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+    } catch (error) {
+      console.error("Error adding document: ", error);
+    }
   };
-  const handleDeleteRequest = (reqId) => {
-     setRequests(prev => prev.filter(r => r.id !== reqId));
-     const id = Date.now();
-     setNotifications(prev => [...prev, { id, title: "Request Removed", subtitle: "Request deleted from list.", status: 'success' }]);
-     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+
+  const handleDeleteRequest = async (reqId) => {
+     try {
+       await deleteDoc(doc(db, "requests", reqId));
+       const id = Date.now();
+       setNotifications(prev => [...prev, { id, title: "Request Deleted", subtitle: "Removed from database.", status: 'success' }]);
+       setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+     } catch (error) {
+       console.error("Error deleting document: ", error);
+     }
   };
 
   const handleDeleteAlbum = (albumId) => { if (window.confirm("Delete album?")) { setAlbums(prev => prev.filter(a => a.id !== albumId)); setCurrentView('home'); const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Album Deleted", subtitle: "Removed from library.", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); } };
