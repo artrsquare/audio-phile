@@ -8,7 +8,7 @@ import {
   Image as ImageIcon, Lock, Trash2, Link as LinkIcon,
   Calendar, Building2, Tag, AlertCircle, FileText, Copyright,
   TrendingUp, Layers, Newspaper, Shuffle, Repeat, Clock, Activity,
-  MessageSquarePlus, Send, Menu, ChevronRight, ListMusic
+  MessageSquarePlus, Send, Menu, ChevronRight, ListMusic, Inbox
 } from 'lucide-react';
 
 // --- UTILITY: GOOGLE DRIVE LINK CONVERTER ---
@@ -162,6 +162,28 @@ const FORMAT_DETAILS = {
 
 // --- COMPONENTS ---
 
+// MobileNav Component (Defined outside App to prevent re-render loop)
+const MobileNav = ({ currentView, setCurrentView, setRequestModalOpen, setUploadModalOpen, isAdmin }) => (
+  <div className="fixed bottom-0 left-0 right-0 h-16 bg-[#121212]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around z-50 md:hidden pb-safe">
+    <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center gap-1 ${currentView === 'home' ? 'text-white' : 'text-zinc-500'}`}>
+      <Home size={20} />
+      <span className="text-[10px] font-medium">Home</span>
+    </button>
+    <button onClick={() => setCurrentView('home')} className="flex flex-col items-center gap-1 text-zinc-500">
+      <Library size={20} />
+      <span className="text-[10px] font-medium">Library</span>
+    </button>
+    <button onClick={() => setRequestModalOpen(true)} className="flex flex-col items-center gap-1 text-zinc-500">
+      <MessageSquarePlus size={20} />
+      <span className="text-[10px] font-medium">Request</span>
+    </button>
+    <button onClick={() => setUploadModalOpen(true)} className={`flex flex-col items-center gap-1 ${isAdmin ? 'text-emerald-500' : 'text-zinc-500'}`}>
+      <User size={20} />
+      <span className="text-[10px] font-medium">{isAdmin ? 'Admin' : 'Login'}</span>
+    </button>
+  </div>
+);
+
 const RequestModal = ({ isOpen, onClose, onRequest }) => {
   if (!isOpen) return null;
 
@@ -247,13 +269,13 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
 
            <div className="space-y-2">
             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Preferred Quality</label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                {['FLAC', 'ALAC', 'WAV', 'MP3 (320)'].map((q) => (
                  <button
                    key={q}
                    type="button"
                    onClick={() => setFormData({...formData, quality: q})}
-                   className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all border ${formData.quality === q ? 'bg-fuchsia-500/20 border-fuchsia-500 text-fuchsia-300' : 'bg-white/5 border-white/5 text-zinc-500 hover:bg-white/10'}`}
+                   className={`flex-1 min-w-[80px] py-2.5 rounded-lg text-xs font-bold transition-all border whitespace-nowrap ${formData.quality === q ? 'bg-fuchsia-500/20 border-fuchsia-500 text-fuchsia-300' : 'bg-white/5 border-white/5 text-zinc-500 hover:bg-white/10'}`}
                  >
                    {q}
                  </button>
@@ -264,7 +286,7 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
           <div className="space-y-2">
             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Additional Notes</label>
             <textarea 
-              className="w-full bg-white/5 border border-white/5 rounded-xl p-3 text-white placeholder:text-zinc-600 focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 focus:outline-none transition-all resize-none h-24"
+              className="w-full bg-white/5 border border-white/5 rounded-xl p-3 text-white placeholder:text-zinc-600 focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 focus:outline-none transition-all resize-none h-20"
               placeholder="Specific version, release year, or anything else..."
               value={formData.notes}
               onChange={e => setFormData({...formData, notes: e.target.value})}
@@ -282,11 +304,13 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
   );
 };
 
-const UploadModal = ({ isOpen, onClose, onUpload, isAdmin, onAdminLogin }) => {
+const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isAdmin, onAdminLogin }) => {
   if (!isOpen) return null;
 
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [activeTab, setActiveTab] = useState('upload'); 
+
   const [formData, setFormData] = useState({
     title: '', artists: [], currentArtistInput: '', year: '', genre: '',
     studio: '', copyright: '', cover: null, tracks: [],
@@ -359,39 +383,95 @@ const UploadModal = ({ isOpen, onClose, onUpload, isAdmin, onAdminLogin }) => {
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="bg-[#0f0f11] border border-white/10 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        <div className="p-6 border-b border-white/5 flex justify-between items-start shrink-0 bg-white/[0.02]">
-          <div><h3 className="text-xl font-bold text-white mb-1">Creator Studio</h3><p className="text-zinc-400 text-sm">Upload and manage high-fidelity assets.</p></div>
+        <div className="p-6 border-b border-white/5 flex justify-between items-center shrink-0 bg-white/[0.02]">
+           <div className="flex items-center gap-4">
+             <button 
+               onClick={() => setActiveTab('upload')}
+               className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors ${activeTab === 'upload' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}
+             >
+               Upload Music
+             </button>
+             <button 
+               onClick={() => setActiveTab('requests')}
+               className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${activeTab === 'requests' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}
+             >
+               Audience Requests
+               {requests.length > 0 && <span className="bg-fuchsia-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{requests.length}</span>}
+             </button>
+           </div>
           <button onClick={onClose} className="text-zinc-400 hover:text-white bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors"><X size={20} /></button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-8 overflow-y-auto custom-scrollbar">
-          {/* Metadata Section */}
-          <div className="space-y-6">
-            <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Disc size={14}/> Album Metadata</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Title</label><input required type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="e.g. Neon Nights" /></div>
-              <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art</label><div className="flex gap-3"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" placeholder="Image URL..." value={formData.cover || ''} onChange={e => setFormData({...formData, cover: e.target.value})} /><div className="w-12 h-12 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0">{formData.cover ? <img src={formData.cover} className="w-full h-full object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}</div></div></div>
+        
+        <div className="p-8 overflow-y-auto custom-scrollbar">
+          {activeTab === 'requests' ? (
+            <div className="space-y-4">
+              {requests.length === 0 ? (
+                <div className="text-center py-12 text-zinc-500 flex flex-col items-center gap-3">
+                  <Inbox size={48} className="opacity-20" />
+                  <p>No pending requests.</p>
+                </div>
+              ) : (
+                requests.map(req => (
+                  <div key={req.id} className="bg-white/5 border border-white/5 rounded-2xl p-5 flex items-start justify-between hover:bg-white/10 transition-colors group">
+                    <div className="flex-1 min-w-0 mr-4">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-lg font-bold text-white">{req.title}</span>
+                        <span className="text-xs bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded border border-fuchsia-500/30 font-bold">{req.quality}</span>
+                      </div>
+                      <div className="text-sm text-zinc-400 font-medium mb-1">Artist: <span className="text-zinc-200">{req.artist}</span></div>
+                      {req.album && <div className="text-sm text-zinc-400 font-medium mb-1">Album: <span className="text-zinc-200">{req.album}</span></div>}
+                      {req.notes && <div className="text-sm text-zinc-500 mt-3 p-3 bg-black/20 rounded-lg italic border border-white/5">"{req.notes}"</div>}
+                      {req.link && (
+                        <a href={req.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-xs text-emerald-400 mt-3 hover:underline font-bold">
+                          <LinkIcon size={12} /> Reference Link
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <button 
+                        onClick={() => onDeleteRequest(req.id)}
+                        className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                        title="Delete Request"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-               <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Year</label><input type="number" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} /></div>
-               <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Genre</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.genre} onChange={e => setFormData({...formData, genre: e.target.value})} /></div>
-               <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Artist</label><div className="flex gap-2"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentArtistInput} onChange={e => setFormData({...formData, currentArtistInput: e.target.value})} placeholder="Name" /><button type="button" onClick={handleAddArtist} className="bg-white/5 border border-white/10 px-3 rounded-xl hover:bg-white/10"><Plus size={18} className="text-zinc-300"/></button></div></div>
-            </div>
-            <div className="flex flex-wrap gap-2">{formData.artists.map((artist, i) => (<span key={i} className="bg-violet-500/10 text-violet-300 border border-violet-500/20 px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2">{artist} <button type="button" onClick={() => removeArtist(i)} className="hover:text-white"><X size={12}/></button></span>))}</div>
-          </div>
-          <hr className="border-white/5" />
-          {/* Track Section */}
-          <div className="space-y-6">
-            <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Music size={14}/> Track Management</h4>
-            {formData.tracks.length > 0 && (<div className="space-y-2 mb-6 bg-white/5 p-4 rounded-2xl border border-white/5">{formData.tracks.map((t, i) => (<div key={i} className="flex justify-between items-center text-sm py-1"><span className="text-zinc-300 flex items-center gap-3"><span className="text-zinc-600 font-mono text-xs">{i+1}</span> {t.title}</span><div className="flex items-center gap-4"><div className="flex gap-1">{t.formats.map(f => <span key={f} className="text-[9px] bg-black/30 px-2 py-0.5 rounded-full text-zinc-400 border border-white/5">{f}</span>)}</div><button type="button" onClick={() => removeTrack(i)} className="text-zinc-600 hover:text-red-400"><Trash2 size={14}/></button></div></div>))}</div>)}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
-               <div className="col-span-1 sm:col-span-3 space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Track Title</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentSongTitle} onChange={e => setFormData({...formData, currentSongTitle: e.target.value})} placeholder="Song Name" /></div>
-               <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Time</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentDuration} onChange={e => setFormData({...formData, currentDuration: e.target.value})} /></div>
-            </div>
-            <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cloud Links (Optional)</label><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{Object.keys(formData.currentLinks).map(fmt => (<div key={fmt} className="flex items-center gap-2"><div className="w-12 text-[10px] font-bold text-center bg-white/5 py-2 rounded-lg text-zinc-400 border border-white/5">{fmt}</div><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-violet-500/50 focus:outline-none" placeholder="Link..." value={formData.currentLinks[fmt]} onChange={e => setFormData(prev => ({...prev, currentLinks: {...prev.currentLinks, [fmt]: e.target.value}}))} /></div>))}</div></div>
-            <div className="flex justify-end pt-2"><button type="button" onClick={handleAddTrack} disabled={!formData.currentSongTitle} className="bg-white/10 hover:bg-white/15 text-white px-6 py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-white/5">+ Add to Queue</button></div>
-          </div>
-          <div className="flex gap-4 pt-4"><button type="button" onClick={onClose} className="flex-1 py-3.5 rounded-xl text-zinc-400 font-bold hover:bg-white/5 transition-colors">Cancel</button><button type="submit" className="flex-[2] py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-bold transition-all shadow-lg shadow-violet-500/20 transform hover:-translate-y-0.5">Publish Release</button></div>
-        </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-8">
+              {/* Metadata Section */}
+              <div className="space-y-6">
+                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Disc size={14}/> Album Metadata</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Title</label><input required type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="e.g. Neon Nights" /></div>
+                  <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art</label><div className="flex gap-3"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" placeholder="Image URL..." value={formData.cover || ''} onChange={e => setFormData({...formData, cover: e.target.value})} /><div className="w-12 h-12 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0">{formData.cover ? <img src={formData.cover} className="w-full h-full object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}</div></div></div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Year</label><input type="number" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} /></div>
+                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Genre</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.genre} onChange={e => setFormData({...formData, genre: e.target.value})} /></div>
+                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Artist</label><div className="flex gap-2"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentArtistInput} onChange={e => setFormData({...formData, currentArtistInput: e.target.value})} placeholder="Name" /><button type="button" onClick={handleAddArtist} className="bg-white/5 border border-white/10 px-3 rounded-xl hover:bg-white/10"><Plus size={18} className="text-zinc-300"/></button></div></div>
+                </div>
+                <div className="flex flex-wrap gap-2">{formData.artists.map((artist, i) => (<span key={i} className="bg-violet-500/10 text-violet-300 border border-violet-500/20 px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2">{artist} <button type="button" onClick={() => removeArtist(i)} className="hover:text-white"><X size={12}/></button></span>))}</div>
+              </div>
+              <hr className="border-white/5" />
+              {/* Track Section */}
+              <div className="space-y-6">
+                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Music size={14}/> Track Management</h4>
+                {formData.tracks.length > 0 && (<div className="space-y-2 mb-6 bg-white/5 p-4 rounded-2xl border border-white/5">{formData.tracks.map((t, i) => (<div key={i} className="flex justify-between items-center text-sm py-1"><span className="text-zinc-300 flex items-center gap-3"><span className="text-zinc-600 font-mono text-xs">{i+1}</span> {t.title}</span><div className="flex items-center gap-4"><div className="flex gap-1">{t.formats.map(f => <span key={f} className="text-[9px] bg-black/30 px-2 py-0.5 rounded-full text-zinc-400 border border-white/5">{f}</span>)}</div><button type="button" onClick={() => removeTrack(i)} className="text-zinc-600 hover:text-red-400"><Trash2 size={14}/></button></div></div>))}</div>)}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
+                   <div className="col-span-1 sm:col-span-3 space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Track Title</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentSongTitle} onChange={e => setFormData({...formData, currentSongTitle: e.target.value})} placeholder="Song Name" /></div>
+                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Time</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentDuration} onChange={e => setFormData({...formData, currentDuration: e.target.value})} /></div>
+                </div>
+                <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cloud Links (Optional)</label><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{Object.keys(formData.currentLinks).map(fmt => (<div key={fmt} className="flex items-center gap-2"><div className="w-12 text-[10px] font-bold text-center bg-white/5 py-2 rounded-lg text-zinc-400 border border-white/5">{fmt}</div><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-violet-500/50 focus:outline-none" placeholder="Link..." value={formData.currentLinks[fmt]} onChange={e => setFormData(prev => ({...prev, currentLinks: {...prev.currentLinks, [fmt]: e.target.value}}))} /></div>))}</div></div>
+                <div className="flex justify-end pt-2"><button type="button" onClick={handleAddTrack} disabled={!formData.currentSongTitle} className="bg-white/10 hover:bg-white/15 text-white px-6 py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-white/5">+ Add to Queue</button></div>
+              </div>
+              <div className="flex gap-4 pt-4"><button type="button" onClick={onClose} className="flex-1 py-3.5 rounded-xl text-zinc-400 font-bold hover:bg-white/5 transition-colors">Cancel</button><button type="submit" className="flex-[2] py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-bold transition-all shadow-lg shadow-violet-500/20 transform hover:-translate-y-0.5">Publish Release</button></div>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -464,6 +544,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState(0); 
+  const [requests, setRequests] = useState([]); // New state for requests
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null);
@@ -523,7 +604,21 @@ export default function App() {
   const handleDownloadClick = (song) => { setDownloadModalData(song); };
   const performDownload = (format) => { const id = Date.now(); setNotifications(prev => [...prev, { id, title: `Opening Download...`, subtitle: `${format} • Checking Link`, status: 'success' }]); setDownloadModalData(null); setTimeout(() => { setNotifications(prev => prev.filter(n => n.id !== id)); }, 4000); };
   const handleUpload = (newAlbum) => { setAlbums(prev => [newAlbum, ...prev]); const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Release Published", subtitle: `${newAlbum.title} is live`, status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); };
-  const handleRequestSong = (data) => { const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Request Received", subtitle: `We'll find "${data.title}"`, status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); };
+  
+  // Updated: store request in state
+  const handleRequestSong = (data) => { 
+    setRequests(prev => [...prev, { id: Date.now(), ...data }]);
+    const id = Date.now(); 
+    setNotifications(prev => [...prev, { id, title: "Request Received", subtitle: `We'll find "${data.title}"`, status: 'success' }]); 
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); 
+  };
+  const handleDeleteRequest = (reqId) => {
+     setRequests(prev => prev.filter(r => r.id !== reqId));
+     const id = Date.now();
+     setNotifications(prev => [...prev, { id, title: "Request Removed", subtitle: "Request deleted from list.", status: 'success' }]);
+     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+  };
+
   const handleDeleteAlbum = (albumId) => { if (window.confirm("Delete album?")) { setAlbums(prev => prev.filter(a => a.id !== albumId)); setCurrentView('home'); const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Album Deleted", subtitle: "Removed from library.", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); } };
   const handleDeleteSong = (e, songId) => { e.stopPropagation(); if (window.confirm("Delete song?")) { const updatedSongs = selectedAlbum.songs.filter(s => s.id !== songId); const updatedAlbum = { ...selectedAlbum, songs: updatedSongs }; setSelectedAlbum(updatedAlbum); setAlbums(prev => prev.map(a => a.id === selectedAlbum.id ? updatedAlbum : a)); if (currentSong?.id === songId) { setIsPlaying(false); setCurrentSong(null); } } };
   const generateLinerNotes = async (album) => { setAiTitle(`Liner Notes: ${album.title}`); setAiType('liner'); setAiContent(''); setAiModalOpen(true); setAiLoading(true); const prompt = `Write sophisticated liner notes for "${album.title}" by "${album.artist}". Genre: "${album.genre || 'Audiophile'}". Tone: Professional Music Critic.`; const text = await callGemini(prompt); setAiContent(text); setAiLoading(false); };
@@ -551,6 +646,115 @@ export default function App() {
       </button>
     </div>
   );
+
+  const renderContent = () => {
+    if (currentView === 'album') {
+      return (
+        <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
+          {/* ALBUM HEADER */}
+          <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-start md:items-end mb-8 md:mb-10 p-6 md:p-8 rounded-[32px] bg-gradient-to-b from-white/5 to-transparent border border-white/5">
+            <img src={selectedAlbum.cover} className="w-48 h-48 md:w-64 md:h-64 rounded-2xl shadow-2xl shadow-black/50 self-center md:self-auto" />
+            <div className="flex flex-col gap-3 md:gap-4 w-full text-center md:text-left">
+              <span className="text-xs font-bold tracking-widest uppercase text-zinc-400">Album</span>
+              <h1 className="text-3xl md:text-5xl lg:text-7xl font-black text-white tracking-tight leading-none">{selectedAlbum.title}</h1>
+              <div className="flex items-center justify-center md:justify-start gap-3 text-sm font-medium text-zinc-300 mt-2 flex-wrap">
+                <img src={selectedAlbum.cover} className="w-6 h-6 rounded-full" />
+                <span className="text-white">{selectedAlbum.artist}</span>
+                <span className="w-1 h-1 bg-zinc-500 rounded-full" />
+                <span>{selectedAlbum.year}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.02] rounded-[32px] border border-white/5 p-2">
+            <div className="px-4 md:px-6 py-4 flex items-center gap-4 border-b border-white/5 mb-2 overflow-x-auto no-scrollbar">
+              <button onClick={() => handlePlay(selectedAlbum.songs[0], selectedAlbum)} className="bg-fuchsia-500 text-white p-3 md:p-4 rounded-full hover:scale-105 transition-transform shadow-lg shadow-fuchsia-500/20 shrink-0">
+                {isPlaying && currentSong?.albumArt === selectedAlbum.cover ? <Pause fill="white" size={20} /> : <Play fill="white" className="ml-1" size={20} />}
+              </button>
+              <button className="p-3 rounded-full border border-zinc-700 text-zinc-400 hover:text-white hover:border-white transition-colors shrink-0"><Heart size={20} /></button>
+              {isAdmin && <button onClick={() => handleDeleteAlbum(selectedAlbum.id)} className="p-3 rounded-full border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-400 transition-colors shrink-0"><Trash2 size={20} /></button>}
+              <div className="ml-auto"><button onClick={() => generateLinerNotes(selectedAlbum)} className="text-xs font-bold bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full text-zinc-300 transition-colors border border-white/5 flex items-center gap-2 whitespace-nowrap"><Sparkles size={14} className="text-fuchsia-400" /> AI Insight</button></div>
+            </div>
+
+            <div className="flex flex-col">
+              {selectedAlbum.songs.map((song, idx) => {
+                const isCurrent = currentSong?.id === song.id;
+                return (
+                  <div key={song.id} onClick={() => handlePlay(song, selectedAlbum)} className={`flex items-center gap-4 px-4 md:px-6 py-3 md:py-4 rounded-xl cursor-pointer group transition-colors ${isCurrent ? 'bg-white/10' : 'hover:bg-white/5'}`}>
+                    <span className="text-sm text-zinc-500 font-mono w-6 text-center">{isCurrent && isPlaying ? <Activity size={16} className="text-fuchsia-500 animate-pulse" /> : idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-semibold text-sm md:text-base truncate ${isCurrent ? 'text-fuchsia-400' : 'text-white'}`}>{song.title}</div>
+                      <div className="text-xs text-zinc-500 truncate">{song.artist}</div>
+                    </div>
+                    <div className="hidden md:flex gap-2">
+                      {song.specs && <span className="text-[10px] border border-white/10 px-2 py-0.5 rounded text-zinc-400 bg-black/20">{song.specs}</span>}
+                    </div>
+                    <span className="text-xs md:text-sm text-zinc-500 font-mono">{song.duration}</span>
+                    <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); handleDownloadClick(song) }} className="text-zinc-400 hover:text-white"><Download size={18} /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // HOME VIEW
+    const filtered = getFilteredAlbums();
+    return (
+      <div className="space-y-8 md:space-y-12">
+        {!searchQuery && (
+          <div className="relative w-full min-h-[300px] md:min-h-[400px] rounded-[24px] md:rounded-[32px] overflow-hidden group shadow-2xl flex flex-col md:flex-row items-end">
+            <img src="https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=1200&h=600&fit=crop" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-90" />
+            <div className="relative z-10 p-6 md:p-10 max-w-3xl w-full">
+              <span className="inline-block px-3 py-1 bg-violet-500/20 text-violet-200 text-[10px] font-bold uppercase tracking-widest rounded-full border border-violet-500/20 mb-4 backdrop-blur-md">Featured Master</span>
+              <h1 className="text-3xl md:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight leading-tight">Lossless Horizons</h1>
+              <p className="text-zinc-300 text-sm md:text-lg mb-6 md:mb-8 font-light leading-relaxed max-w-xl">Dive into a soundscape where every detail matters.</p>
+              <div className="flex gap-4">
+                <button onClick={() => { setSelectedAlbum(albums[2]); setCurrentView('album'); }} className="bg-white text-black px-6 md:px-8 py-3 md:py-3.5 rounded-full font-bold flex items-center gap-2 hover:bg-zinc-200 transition-transform hover:scale-105 shadow-xl shadow-white/10 text-sm md:text-base">
+                  <Play size={20} fill="black" /> Play Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6 flex items-center gap-2">
+            {searchQuery ? `Searching: "${searchQuery}"` : "Fresh Releases"}
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+            {getFilteredAlbums().map(album => (
+              <div key={album.id} onClick={() => { setSelectedAlbum(album); setCurrentView('album'); }} className="bg-white/5 p-3 md:p-5 rounded-2xl hover:bg-white/10 transition-all cursor-pointer group border border-white/5 hover:border-white/10 hover:-translate-y-1 duration-300">
+                <div className="relative aspect-square mb-3 md:mb-4 rounded-xl overflow-hidden shadow-lg">
+                  <img src={album.cover} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                </div>
+                <h3 className="font-bold text-white text-sm md:text-base mb-1 truncate">{album.title}</h3>
+                <p className="text-xs md:text-sm text-zinc-400 truncate">{album.artist}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {!searchQuery && (
+          <div>
+            <h2 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6">Browse Categories</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {MOCK_CATEGORIES.slice(0, 4).map(cat => (
+                <div key={cat.id} className={`${cat.color} h-24 md:h-32 rounded-2xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform border border-white/5`}>
+                  <span className="font-bold text-lg md:text-xl z-10 relative break-words">{cat.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="h-screen w-full bg-[#09090b] text-white flex overflow-hidden font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200">
@@ -660,106 +864,7 @@ export default function App() {
 
          {/* Scrollable Content */}
          <div className={`flex-1 overflow-y-auto custom-scrollbar px-4 md:px-8 py-4 relative z-10 ${currentSong ? 'pb-40' : 'pb-24 md:pb-8'}`}>
-            {currentView === 'home' ? (
-              <div className="space-y-8 md:space-y-12">
-                 {!searchQuery && (
-                   <div className="relative w-full min-h-[300px] md:min-h-[400px] rounded-[24px] md:rounded-[32px] overflow-hidden group shadow-2xl flex flex-col md:flex-row items-end">
-                      <img src="https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=1200&h=600&fit=crop" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-90" />
-                      <div className="relative z-10 p-6 md:p-10 max-w-3xl w-full">
-                         <span className="inline-block px-3 py-1 bg-violet-500/20 text-violet-200 text-[10px] font-bold uppercase tracking-widest rounded-full border border-violet-500/20 mb-4 backdrop-blur-md">Featured Master</span>
-                         <h1 className="text-3xl md:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight leading-tight">Lossless Horizons</h1>
-                         <p className="text-zinc-300 text-sm md:text-lg mb-6 md:mb-8 font-light leading-relaxed max-w-xl">Dive into a soundscape where every detail matters.</p>
-                         <div className="flex gap-4">
-                           <button onClick={() => { setSelectedAlbum(albums[2]); setCurrentView('album'); }} className="bg-white text-black px-6 md:px-8 py-3 md:py-3.5 rounded-full font-bold flex items-center gap-2 hover:bg-zinc-200 transition-transform hover:scale-105 shadow-xl shadow-white/10 text-sm md:text-base">
-                             <Play size={20} fill="black"/> Play Now
-                           </button>
-                         </div>
-                      </div>
-                   </div>
-                 )}
-
-                 <div>
-                    <h2 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6 flex items-center gap-2">
-                      {searchQuery ? `Searching: "${searchQuery}"` : "Fresh Releases"}
-                    </h2>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
-                       {getFilteredAlbums().map(album => (
-                         <div key={album.id} onClick={() => { setSelectedAlbum(album); setCurrentView('album'); }} className="bg-white/5 p-3 md:p-5 rounded-2xl hover:bg-white/10 transition-all cursor-pointer group border border-white/5 hover:border-white/10 hover:-translate-y-1 duration-300">
-                           <div className="relative aspect-square mb-3 md:mb-4 rounded-xl overflow-hidden shadow-lg">
-                             <img src={album.cover} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                           </div>
-                           <h3 className="font-bold text-white text-sm md:text-base mb-1 truncate">{album.title}</h3>
-                           <p className="text-xs md:text-sm text-zinc-400 truncate">{album.artist}</p>
-                         </div>
-                       ))}
-                    </div>
-                 </div>
-                 
-                 {!searchQuery && (
-                   <div>
-                      <h2 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6">Browse Categories</h2>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        {MOCK_CATEGORIES.slice(0,4).map(cat => (
-                          <div key={cat.id} className={`${cat.color} h-24 md:h-32 rounded-2xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform border border-white/5`}>
-                             <span className="font-bold text-lg md:text-xl z-10 relative break-words">{cat.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                   </div>
-                 )}
-              </div>
-            ) : (
-              // ALBUM VIEW
-              <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
-                 <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-start md:items-end mb-8 md:mb-10 p-6 md:p-8 rounded-[32px] bg-gradient-to-b from-white/5 to-transparent border border-white/5">
-                    <img src={selectedAlbum.cover} className="w-48 h-48 md:w-64 md:h-64 rounded-2xl shadow-2xl shadow-black/50 self-center md:self-auto" />
-                    <div className="flex flex-col gap-3 md:gap-4 w-full text-center md:text-left">
-                       <span className="text-xs font-bold tracking-widest uppercase text-zinc-400">Album</span>
-                       <h1 className="text-3xl md:text-5xl lg:text-7xl font-black text-white tracking-tight leading-none">{selectedAlbum.title}</h1>
-                       <div className="flex items-center justify-center md:justify-start gap-3 text-sm font-medium text-zinc-300 mt-2 flex-wrap">
-                          <img src={selectedAlbum.cover} className="w-6 h-6 rounded-full" />
-                          <span className="text-white">{selectedAlbum.artist}</span>
-                          <span className="w-1 h-1 bg-zinc-500 rounded-full"/>
-                          <span>{selectedAlbum.year}</span>
-                       </div>
-                    </div>
-                 </div>
-
-                 <div className="bg-white/[0.02] rounded-[32px] border border-white/5 p-2">
-                    <div className="px-4 md:px-6 py-4 flex items-center gap-4 border-b border-white/5 mb-2 overflow-x-auto no-scrollbar">
-                       <button onClick={() => handlePlay(selectedAlbum.songs[0], selectedAlbum)} className="bg-fuchsia-500 text-white p-3 md:p-4 rounded-full hover:scale-105 transition-transform shadow-lg shadow-fuchsia-500/20 shrink-0">
-                         {isPlaying && currentSong?.albumArt === selectedAlbum.cover ? <Pause fill="white" size={20}/> : <Play fill="white" className="ml-1" size={20}/>}
-                       </button>
-                       <button className="p-3 rounded-full border border-zinc-700 text-zinc-400 hover:text-white hover:border-white transition-colors shrink-0"><Heart size={20}/></button>
-                       {isAdmin && <button onClick={() => handleDeleteAlbum(selectedAlbum.id)} className="p-3 rounded-full border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-400 transition-colors shrink-0"><Trash2 size={20}/></button>}
-                       <div className="ml-auto"><button onClick={() => generateLinerNotes(selectedAlbum)} className="text-xs font-bold bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full text-zinc-300 transition-colors border border-white/5 flex items-center gap-2 whitespace-nowrap"><Sparkles size={14} className="text-fuchsia-400"/> AI Insight</button></div>
-                    </div>
-
-                    <div className="flex flex-col">
-                       {selectedAlbum.songs.map((song, idx) => {
-                         const isCurrent = currentSong?.id === song.id;
-                         return (
-                           <div key={song.id} onClick={() => handlePlay(song, selectedAlbum)} className={`flex items-center gap-4 px-4 md:px-6 py-3 md:py-4 rounded-xl cursor-pointer group transition-colors ${isCurrent ? 'bg-white/10' : 'hover:bg-white/5'}`}>
-                              <span className="text-sm text-zinc-500 font-mono w-6 text-center">{isCurrent && isPlaying ? <Activity size={16} className="text-fuchsia-500 animate-pulse"/> : idx + 1}</span>
-                              <div className="flex-1 min-w-0">
-                                <div className={`font-semibold text-sm md:text-base truncate ${isCurrent ? 'text-fuchsia-400' : 'text-white'}`}>{song.title}</div>
-                                <div className="text-xs text-zinc-500 truncate">{song.artist}</div>
-                              </div>
-                              <div className="hidden md:flex gap-2">
-                                 {song.specs && <span className="text-[10px] border border-white/10 px-2 py-0.5 rounded text-zinc-400 bg-black/20">{song.specs}</span>}
-                              </div>
-                              <span className="text-xs md:text-sm text-zinc-500 font-mono">{song.duration}</span>
-                              <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                                 <button onClick={(e) => {e.stopPropagation(); handleDownloadClick(song)}} className="text-zinc-400 hover:text-white"><Download size={18}/></button>
-                              </div>
-                           </div>
-                         );
-                       })}
-                    </div>
-                 </div>
-              </div>
-            )}
+            {renderContent()}
          </div>
       </div>
 
@@ -811,7 +916,7 @@ export default function App() {
       {/* MODALS */}
       <RequestModal isOpen={requestModalOpen} onClose={() => setRequestModalOpen(false)} onRequest={handleRequestSong} />
       <DownloadModal isOpen={!!downloadModalData} onClose={() => setDownloadModalData(null)} song={downloadModalData} onDownload={performDownload} />
-      <UploadModal isOpen={uploadModalOpen} onClose={() => setUploadModalOpen(false)} onUpload={handleUpload} isAdmin={isAdmin} onAdminLogin={setIsAdmin} />
+      <UploadModal isOpen={uploadModalOpen} onClose={() => setUploadModalOpen(false)} onUpload={handleUpload} requests={requests} onDeleteRequest={handleDeleteRequest} isAdmin={isAdmin} onAdminLogin={setIsAdmin} />
       <AIModal isOpen={aiModalOpen} onClose={() => setAiModalOpen(false)} title={aiTitle} content={aiContent} isLoading={aiLoading} type={aiType} />
 
       {/* TOASTS */}
