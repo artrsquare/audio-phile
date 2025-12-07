@@ -3,6 +3,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
+// --- METADATA IMPORT (UNCOMMENT FOR LOCAL USE) ---
+// To use auto-fill locally: npm install music-metadata-browser buffer
+// then uncomment the lines below:
+// import * as mm from 'music-metadata-browser';
+// import { Buffer } from 'buffer';
+// if (typeof window !== 'undefined') {
+//   window.Buffer = window.Buffer || Buffer;
+// }
+
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
   Home, Search, Library, Download, Heart, 
@@ -12,7 +21,7 @@ import {
   Image as ImageIcon, Lock, Trash2, Link as LinkIcon,
   Calendar, Building2, Tag, AlertCircle, FileText, Copyright,
   TrendingUp, Layers, Newspaper, Shuffle, Repeat, Clock, Activity,
-  MessageSquarePlus, Send, Menu, ChevronRight, ListMusic, Inbox
+  MessageSquarePlus, Send, Menu, ChevronRight, ListMusic, Inbox, FileAudio
 } from 'lucide-react';
 
 // --- UTILITY: GOOGLE DRIVE LINK CONVERTER ---
@@ -26,6 +35,13 @@ const getDirectUrl = (url) => {
     }
   }
   return url;
+};
+
+// --- UTILITY: FORMAT DURATION ---
+const formatDuration = (seconds) => {
+  const min = Math.floor(seconds / 60);
+  const sec = Math.floor(seconds % 60);
+  return `${min}:${sec.toString().padStart(2, '0')}`;
 };
 
 // --- GEMINI API CONFIG ---
@@ -292,6 +308,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [activeTab, setActiveTab] = useState('upload'); 
+  const [isAutoFilling, setIsAutoFilling] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '', artists: [], currentArtistInput: '', year: '', genre: '',
@@ -319,6 +336,12 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
         setAuthError('Blocked for 2 days.');
       } else { setAuthError(`Incorrect. ${5 - attempts} attempts left.`); }
     }
+  };
+
+  // --- AUTO-FILL HANDLER ---
+  const handleFileSelect = async (e) => {
+    // UNCOMMENT FOR LOCAL USE AFTER INSTALLING 'music-metadata-browser'
+    alert("Please run 'npm install music-metadata-browser buffer' locally and uncomment the import lines in App.jsx to enable this feature.");
   };
 
   const handleAddArtist = () => { if (formData.currentArtistInput.trim()) setFormData(prev => ({ ...prev, artists: [...prev.artists, prev.currentArtistInput.trim()], currentArtistInput: '' })); };
@@ -367,19 +390,8 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
       <div className="bg-[#0f0f11] border border-white/10 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-6 border-b border-white/5 flex justify-between items-center shrink-0 bg-white/[0.02]">
            <div className="flex items-center gap-4">
-             <button 
-               onClick={() => setActiveTab('upload')}
-               className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors ${activeTab === 'upload' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}
-             >
-               Upload Music
-             </button>
-             <button 
-               onClick={() => setActiveTab('requests')}
-               className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${activeTab === 'requests' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}
-             >
-               Audience Requests
-               {requests.length > 0 && <span className="bg-fuchsia-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{requests.length}</span>}
-             </button>
+             <button onClick={() => setActiveTab('upload')} className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors ${activeTab === 'upload' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}>Upload Music</button>
+             <button onClick={() => setActiveTab('requests')} className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${activeTab === 'requests' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}>Audience Requests {requests.length > 0 && <span className="bg-fuchsia-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{requests.length}</span>}</button>
            </div>
           <button onClick={onClose} className="text-zinc-400 hover:text-white bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors"><X size={20} /></button>
         </div>
@@ -388,35 +400,19 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
           {activeTab === 'requests' ? (
             <div className="space-y-4">
               {requests.length === 0 ? (
-                <div className="text-center py-12 text-zinc-500 flex flex-col items-center gap-3">
-                  <Inbox size={48} className="opacity-20" />
-                  <p>No pending requests.</p>
-                </div>
+                <div className="text-center py-12 text-zinc-500 flex flex-col items-center gap-3"><Inbox size={48} className="opacity-20" /><p>No pending requests.</p></div>
               ) : (
                 requests.map(req => (
                   <div key={req.id} className="bg-white/5 border border-white/5 rounded-2xl p-5 flex items-start justify-between hover:bg-white/10 transition-colors group">
                     <div className="flex-1 min-w-0 mr-4">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="text-lg font-bold text-white">{req.title}</span>
-                        <span className="text-xs bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded border border-fuchsia-500/30 font-bold">{req.quality}</span>
-                      </div>
+                      <div className="flex items-center gap-3 mb-2"><span className="text-lg font-bold text-white">{req.title}</span><span className="text-xs bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded border border-fuchsia-500/30 font-bold">{req.quality}</span></div>
                       <div className="text-sm text-zinc-400 font-medium mb-1">Artist: <span className="text-zinc-200">{req.artist}</span></div>
                       {req.album && <div className="text-sm text-zinc-400 font-medium mb-1">Album: <span className="text-zinc-200">{req.album}</span></div>}
                       {req.notes && <div className="text-sm text-zinc-500 mt-3 p-3 bg-black/20 rounded-lg italic border border-white/5">"{req.notes}"</div>}
-                      {req.link && (
-                        <a href={req.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-xs text-emerald-400 mt-3 hover:underline font-bold">
-                          <LinkIcon size={12} /> Reference Link
-                        </a>
-                      )}
+                      {req.link && (<a href={req.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-xs text-emerald-400 mt-3 hover:underline font-bold"><LinkIcon size={12} /> Reference Link</a>)}
                     </div>
                     <div className="flex flex-col gap-2">
-                      <button 
-                        onClick={() => onDeleteRequest(req.id)}
-                        className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
-                        title="Delete Request"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <button onClick={() => onDeleteRequest(req.id)} className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-colors" title="Delete Request"><Trash2 size={18} /></button>
                     </div>
                   </div>
                 ))
@@ -424,6 +420,26 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-8">
+              {/* MAGIC AUTO-FILL SECTION */}
+              <div className="bg-gradient-to-r from-violet-900/40 to-fuchsia-900/40 p-1 rounded-2xl border border-white/10 mb-6">
+                <div className="bg-[#18181b] rounded-xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/5 rounded-full"><FileAudio size={24} className="text-fuchsia-400" /></div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">Auto-Fill Metadata</h4>
+                      <p className="text-xs text-zinc-400">Drop an MP3 here to instantly fill details.</p>
+                    </div>
+                  </div>
+                  <div className="relative">
+                     <input type="file" accept="audio/*" onChange={handleFileSelect} className="absolute inset-0 opacity-0 cursor-pointer" />
+                     <button type="button" className="bg-white text-black text-xs font-bold px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors flex items-center gap-2">
+                        {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14} />} 
+                        {isAutoFilling ? 'Scanning...' : 'Select File'}
+                     </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Metadata Section */}
               <div className="space-y-6">
                 <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Disc size={14}/> Album Metadata</h4>
@@ -505,6 +521,7 @@ const DownloadModal = ({ isOpen, onClose, song, onDownload }) => {
 
 export default function App() {
   const [albums, setAlbums] = useState(INITIAL_ALBUMS);
+  const [dbAlbums, setDbAlbums] = useState([]); // Store albums from Firestore
   const [currentView, setCurrentView] = useState('home');
   const [selectedAlbum, setSelectedAlbum] = useState(albums[0]);
   const [currentSong, setCurrentSong] = useState(null);
@@ -528,14 +545,24 @@ export default function App() {
   const [repeatMode, setRepeatMode] = useState(0); 
   const [requests, setRequests] = useState([]); 
 
-  // --- DATABASE SYNC: Load requests from Firestore on mount ---
+  // --- DATABASE SYNC: Listeners ---
   useEffect(() => {
-    // FIREBASE SYNC:
-    const unsubscribe = onSnapshot(collection(db, "requests"), (snapshot) => {
+    // 1. Requests Listener
+    const unsubRequests = onSnapshot(collection(db, "requests"), (snapshot) => {
        const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
        setRequests(reqs);
     });
-    return () => unsubscribe();
+
+    // 2. Albums Listener
+    const unsubAlbums = onSnapshot(collection(db, "albums"), (snapshot) => {
+      const fetchedAlbums = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setDbAlbums(fetchedAlbums);
+    });
+
+    return () => {
+      unsubRequests();
+      unsubAlbums();
+    };
   }, []);
 
   const audioRef = useRef(null);
@@ -543,8 +570,9 @@ export default function App() {
   const volumeBarRef = useRef(null);
 
   const getFilteredAlbums = () => {
-    if (!searchQuery) return albums;
-    return albums.filter(album => album.title.toLowerCase().includes(searchQuery.toLowerCase()) || album.artist.toLowerCase().includes(searchQuery.toLowerCase()) || album.songs.some(s => s.title.toLowerCase().includes(searchQuery.toLowerCase())));
+    const allAlbums = [...dbAlbums, ...INITIAL_ALBUMS]; // Combine local and DB albums
+    if (!searchQuery) return allAlbums;
+    return allAlbums.filter(album => album.title.toLowerCase().includes(searchQuery.toLowerCase()) || album.artist.toLowerCase().includes(searchQuery.toLowerCase()) || album.songs.some(s => s.title.toLowerCase().includes(searchQuery.toLowerCase())));
   };
 
   const handlePlay = (song, album) => {
@@ -595,32 +623,26 @@ export default function App() {
 
   const handleDownloadClick = (song) => { setDownloadModalData(song); };
   const performDownload = (format) => { const id = Date.now(); setNotifications(prev => [...prev, { id, title: `Opening Download...`, subtitle: `${format} • Checking Link`, status: 'success' }]); setDownloadModalData(null); setTimeout(() => { setNotifications(prev => prev.filter(n => n.id !== id)); }, 4000); };
-  const handleUpload = (newAlbum) => { setAlbums(prev => [newAlbum, ...prev]); const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Release Published", subtitle: `${newAlbum.title} is live`, status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); };
   
-  // Updated: Handle Request with Firestore logic
+  const handleUpload = async (newAlbum) => { 
+    try {
+      await addDoc(collection(db, "albums"), { ...newAlbum, createdAt: new Date() });
+      const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Release Published", subtitle: `${newAlbum.title} is live`, status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); 
+    } catch (e) { console.error("Upload failed", e); }
+  };
+  
   const handleRequestSong = async (data) => { 
     try {
-      await addDoc(collection(db, "requests"), {
-        ...data,
-        timestamp: new Date()
-      });
-      const id = Date.now();
-      setNotifications(prev => [...prev, { id, title: "Request Sent", subtitle: "Saved to database!", status: 'success' }]);
-      setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
-    } catch (error) {
-      console.error("Error adding document: ", error);
-    }
+      await addDoc(collection(db, "requests"), { ...data, timestamp: new Date() });
+      const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Request Sent", subtitle: "Saved to database!", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); 
+    } catch (e) { console.error("Request failed", e); }
   };
 
   const handleDeleteRequest = async (reqId) => {
      try {
        await deleteDoc(doc(db, "requests", reqId));
-       const id = Date.now();
-       setNotifications(prev => [...prev, { id, title: "Request Deleted", subtitle: "Removed from database.", status: 'success' }]);
-       setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
-     } catch (error) {
-       console.error("Error deleting document: ", error);
-     }
+       const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Request Deleted", subtitle: "Removed from database.", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+     } catch (e) { console.error("Delete failed", e); }
   };
 
   const handleDeleteAlbum = (albumId) => { if (window.confirm("Delete album?")) { setAlbums(prev => prev.filter(a => a.id !== albumId)); setCurrentView('home'); const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Album Deleted", subtitle: "Removed from library.", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); } };
