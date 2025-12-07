@@ -10,8 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "buffer": "^6.0.3",
     "firebase": "^12.6.0",
     "lucide-react": "^0.556.0",
+    "music-metadata-browser": "^2.5.11",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
