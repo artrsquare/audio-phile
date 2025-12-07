@@ -3,9 +3,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
-// --- METADATA IMPORT ---
-// To use auto-fill locally: npm install music-metadata-browser buffer
-// then uncomment the lines below:
+// --- METADATA IMPORT (UNCOMMENT TO ENABLE AUTO-FILL) ---
+// 1. Run: npm install music-metadata-browser buffer
+// 2. Uncomment the lines below:
 // import * as mm from 'music-metadata-browser';
 // import { Buffer } from 'buffer';
 // if (typeof window !== 'undefined') {
@@ -252,7 +252,7 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Reference Link</label>
+            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Reference Link (YouTube/Spotify)</label>
             <div className="relative">
               <LinkIcon className="absolute left-3 top-3.5 text-zinc-600" size={16} />
               <input 
@@ -351,10 +351,12 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
 
     setIsAutoFilling(true);
     
+    // Check if libraries are available before using them
     try {
-      // Dynamic import ensures the app doesn't crash if the library isn't installed initially.
-      // This is safer for development environments.
-      const mm = await import('music-metadata-browser');
+      if (typeof mm === 'undefined' || !mm.parseBlob) {
+        throw new Error("Metadata library not loaded. Ensure npm modules are installed and imports uncommented.");
+      }
+
       const metadata = await mm.parseBlob(file);
       const { common, format } = metadata;
       
@@ -382,9 +384,8 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
         setFormData(prev => ({ ...prev, cover: url }));
       }
     } catch (err) {
-      console.warn("Auto-fill error. Ensure 'music-metadata-browser' and 'buffer' are installed.", err);
-      // Fallback
-      alert("Auto-fill failed. Please enter details manually or check if the library is installed.");
+      console.warn("Auto-fill error:", err);
+      alert("Auto-fill failed. Please ensure 'music-metadata-browser' is installed locally.");
     } finally {
       setIsAutoFilling(false);
     }
@@ -472,7 +473,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
                     <div className="p-3 bg-white/5 rounded-full"><FileAudio size={24} className="text-fuchsia-400" /></div>
                     <div>
                       <h4 className="text-sm font-bold text-white">Auto-Fill Metadata</h4>
-                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, M4A or WAV file to instantly fill details.</p>
+                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, or WAV file to instantly fill details.</p>
                     </div>
                   </div>
                   <div className="relative">
@@ -493,6 +494,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Title</label><input required type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="e.g. Neon Nights" /></div>
                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art</label><div className="flex gap-3"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" placeholder="Image URL..." value={formData.cover || ''} onChange={e => setFormData({...formData, cover: e.target.value})} /><div className="w-12 h-12 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0">{formData.cover ? <img src={formData.cover} className="w-full h-full object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}</div></div></div>
                 </div>
+                {/* ... other form fields ... */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                    <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Year</label><input type="number" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} /></div>
                    <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Genre</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.genre} onChange={e => setFormData({...formData, genre: e.target.value})} /></div>
