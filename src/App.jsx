@@ -1,14 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 // --- FIREBASE IMPORTS ---
+// If firebase.js is missing/broken, this might return undefined. We handle that below.
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
-// --- METADATA & BUFFER SETUP ---
-import { Buffer } from 'buffer';
-// Polyfill Buffer for the browser environment (needed for music-metadata)
-if (typeof window !== 'undefined') {
-  window.Buffer = window.Buffer || Buffer;
-}
+// NOTE: Metadata imports are removed from here to prevent "White Screen" crashes.
+// They are loaded dynamically inside the Upload Modal now.
 
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
@@ -364,17 +361,16 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
     }
   };
 
-  // --- AUTO-FILL HANDLER ---
+  // --- AUTO-FILL HANDLER (DYNAMIC IMPORT) ---
   const handleFileSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setIsAutoFilling(true);
     
-    // Dynamic import to prevent crashes if module is missing
     try {
-      // DYNAMIC IMPORT: This prevents build errors if the package is missing on Vercel/Local
-      // It will only try to load when you actually drop a file.
+      // Dynamic import ensures the app doesn't crash if the library isn't installed initially.
+      // This is safer for development environments.
       const mm = await import('music-metadata-browser');
       const metadata = await mm.parseBlob(file);
       const { common, format } = metadata;
@@ -405,7 +401,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
     } catch (err) {
       console.warn("Auto-fill error. Ensure 'music-metadata-browser' and 'buffer' are installed.", err);
       // Fallback
-      alert("Auto-fill failed. Please check console or enter details manually.");
+      alert("Auto-fill failed. Please enter details manually or check if the library is installed.");
     } finally {
       setIsAutoFilling(false);
     }
@@ -462,6 +458,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
            </div>
           <button onClick={onClose} className="text-zinc-400 hover:text-white bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors"><X size={20} /></button>
         </div>
+        
         <div className="p-8 overflow-y-auto custom-scrollbar">
           {activeTab === 'requests' ? (
             <div className="space-y-4">
@@ -621,18 +618,24 @@ export default function App() {
       const { expiry } = JSON.parse(session);
       if (Date.now() < expiry) setIsAdmin(true);
     }
+    
+    // 2. SAFETY CHECK: Ensure db is initialized before trying to sync
+    if (!db) {
+       console.error("Firebase DB not initialized. Check firebase.js keys.");
+       return;
+    }
 
-    // 2. Requests Listener
+    // 3. Requests Listener
     const unsubRequests = onSnapshot(collection(db, "requests"), (snapshot) => {
        const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
        setRequests(reqs);
-    });
+    }, (error) => console.warn("Requests sync error:", error));
 
-    // 3. Albums Listener
+    // 4. Albums Listener
     const unsubAlbums = onSnapshot(collection(db, "albums"), (snapshot) => {
       const fetchedAlbums = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setDbAlbums(fetchedAlbums);
-    });
+    }, (error) => console.warn("Albums sync error:", error));
 
     return () => {
       unsubRequests();
@@ -701,6 +704,7 @@ export default function App() {
   
   const handleUpload = async (newAlbum) => { 
     try {
+      if (!db) { console.error("Database not connected"); return; }
       await addDoc(collection(db, "albums"), { ...newAlbum, createdAt: new Date() });
       const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Release Published", subtitle: `${newAlbum.title} is live`, status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); 
     } catch (e) { console.error("Upload failed", e); }
@@ -708,14 +712,18 @@ export default function App() {
   
   const handleRequestSong = async (data) => { 
     try {
-      await addDoc(collection(db, "requests"), { ...data, timestamp: new Date() });
+      if (db) {
+          await addDoc(collection(db, "requests"), { ...data, timestamp: new Date() });
+      }
+      // Local feedback for immediate response even if DB is slow/offline
       const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Request Sent", subtitle: "Saved to database!", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000); 
     } catch (e) { console.error("Request failed", e); }
   };
 
   const handleDeleteRequest = async (reqId) => {
      try {
-       await deleteDoc(doc(db, "requests", reqId));
+       if (db) await deleteDoc(doc(db, "requests", reqId));
+       // Optimistic UI update handled by listener, but we show toast
        const id = Date.now(); setNotifications(prev => [...prev, { id, title: "Request Deleted", subtitle: "Removed from database.", status: 'success' }]); setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
      } catch (e) { console.error("Delete failed", e); }
   };
@@ -747,6 +755,115 @@ export default function App() {
       </button>
     </div>
   );
+
+  const renderContent = () => {
+    if (currentView === 'album') {
+      return (
+        <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
+          {/* ALBUM HEADER */}
+          <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-start md:items-end mb-8 md:mb-10 p-6 md:p-8 rounded-[32px] bg-gradient-to-b from-white/5 to-transparent border border-white/5">
+            <img src={selectedAlbum.cover} className="w-48 h-48 md:w-64 md:h-64 rounded-2xl shadow-2xl shadow-black/50 self-center md:self-auto" />
+            <div className="flex flex-col gap-3 md:gap-4 w-full text-center md:text-left">
+              <span className="text-xs font-bold tracking-widest uppercase text-zinc-400">Album</span>
+              <h1 className="text-3xl md:text-5xl lg:text-7xl font-black text-white tracking-tight leading-none">{selectedAlbum.title}</h1>
+              <div className="flex items-center justify-center md:justify-start gap-3 text-sm font-medium text-zinc-300 mt-2 flex-wrap">
+                <img src={selectedAlbum.cover} className="w-6 h-6 rounded-full" />
+                <span className="text-white">{selectedAlbum.artist}</span>
+                <span className="w-1 h-1 bg-zinc-500 rounded-full" />
+                <span>{selectedAlbum.year}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.02] rounded-[32px] border border-white/5 p-2">
+            <div className="px-4 md:px-6 py-4 flex items-center gap-4 border-b border-white/5 mb-2 overflow-x-auto no-scrollbar">
+              <button onClick={() => handlePlay(selectedAlbum.songs[0], selectedAlbum)} className="bg-fuchsia-500 text-white p-3 md:p-4 rounded-full hover:scale-105 transition-transform shadow-lg shadow-fuchsia-500/20 shrink-0">
+                {isPlaying && currentSong?.albumArt === selectedAlbum.cover ? <Pause fill="white" size={20} /> : <Play fill="white" className="ml-1" size={20} />}
+              </button>
+              <button className="p-3 rounded-full border border-zinc-700 text-zinc-400 hover:text-white hover:border-white transition-colors shrink-0"><Heart size={20} /></button>
+              {isAdmin && <button onClick={() => handleDeleteAlbum(selectedAlbum.id)} className="p-3 rounded-full border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-400 transition-colors shrink-0"><Trash2 size={20} /></button>}
+              <div className="ml-auto"><button onClick={() => generateLinerNotes(selectedAlbum)} className="text-xs font-bold bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full text-zinc-300 transition-colors border border-white/5 flex items-center gap-2 whitespace-nowrap"><Sparkles size={14} className="text-fuchsia-400" /> AI Insight</button></div>
+            </div>
+
+            <div className="flex flex-col">
+              {selectedAlbum.songs.map((song, idx) => {
+                const isCurrent = currentSong?.id === song.id;
+                return (
+                  <div key={song.id} onClick={() => handlePlay(song, selectedAlbum)} className={`flex items-center gap-4 px-4 md:px-6 py-3 md:py-4 rounded-xl cursor-pointer group transition-colors ${isCurrent ? 'bg-white/10' : 'hover:bg-white/5'}`}>
+                    <span className="text-sm text-zinc-500 font-mono w-6 text-center">{isCurrent && isPlaying ? <Activity size={16} className="text-fuchsia-500 animate-pulse" /> : idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-semibold text-sm md:text-base truncate ${isCurrent ? 'text-fuchsia-400' : 'text-white'}`}>{song.title}</div>
+                      <div className="text-xs text-zinc-500 truncate">{song.artist}</div>
+                    </div>
+                    <div className="hidden md:flex gap-2">
+                      {song.specs && <span className="text-[10px] border border-white/10 px-2 py-0.5 rounded text-zinc-400 bg-black/20">{song.specs}</span>}
+                    </div>
+                    <span className="text-xs md:text-sm text-zinc-500 font-mono">{song.duration}</span>
+                    <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); handleDownloadClick(song) }} className="text-zinc-400 hover:text-white"><Download size={18} /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // HOME VIEW
+    const filtered = getFilteredAlbums();
+    return (
+      <div className="space-y-8 md:space-y-12">
+        {!searchQuery && (
+          <div className="relative w-full min-h-[300px] md:min-h-[400px] rounded-[24px] md:rounded-[32px] overflow-hidden group shadow-2xl flex flex-col md:flex-row items-end">
+            <img src="https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=1200&h=600&fit=crop" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-90" />
+            <div className="relative z-10 p-6 md:p-10 max-w-3xl w-full">
+              <span className="inline-block px-3 py-1 bg-violet-500/20 text-violet-200 text-[10px] font-bold uppercase tracking-widest rounded-full border border-violet-500/20 mb-4 backdrop-blur-md">Featured Master</span>
+              <h1 className="text-3xl md:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight leading-tight">Lossless Horizons</h1>
+              <p className="text-zinc-300 text-sm md:text-lg mb-6 md:mb-8 font-light leading-relaxed max-w-xl">Dive into a soundscape where every detail matters.</p>
+              <div className="flex gap-4">
+                <button onClick={() => { setSelectedAlbum(albums[2]); setCurrentView('album'); }} className="bg-white text-black px-6 md:px-8 py-3 md:py-3.5 rounded-full font-bold flex items-center gap-2 hover:bg-zinc-200 transition-transform hover:scale-105 shadow-xl shadow-white/10 text-sm md:text-base">
+                  <Play size={20} fill="black" /> Play Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6 flex items-center gap-2">
+            {searchQuery ? `Searching: "${searchQuery}"` : "Fresh Releases"}
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+            {getFilteredAlbums().map(album => (
+              <div key={album.id} onClick={() => { setSelectedAlbum(album); setCurrentView('album'); }} className="bg-white/5 p-3 md:p-5 rounded-2xl hover:bg-white/10 transition-all cursor-pointer group border border-white/5 hover:border-white/10 hover:-translate-y-1 duration-300">
+                <div className="relative aspect-square mb-3 md:mb-4 rounded-xl overflow-hidden shadow-lg">
+                  <img src={album.cover} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                </div>
+                <h3 className="font-bold text-white text-sm md:text-base mb-1 truncate">{album.title}</h3>
+                <p className="text-xs md:text-sm text-zinc-400 truncate">{album.artist}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {!searchQuery && (
+          <div>
+            <h2 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6">Browse Categories</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {MOCK_CATEGORIES.slice(0, 4).map(cat => (
+                <div key={cat.id} className={`${cat.color} h-24 md:h-32 rounded-2xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform border border-white/5`}>
+                  <span className="font-bold text-lg md:text-xl z-10 relative break-words">{cat.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="h-screen w-full bg-[#09090b] text-white flex overflow-hidden font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200">
