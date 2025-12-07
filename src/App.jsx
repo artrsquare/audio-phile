@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 // --- FIREBASE IMPORTS ---
-// If firebase.js is missing/broken, this might return undefined. We handle that below.
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
-// NOTE: Metadata imports are removed from here to prevent "White Screen" crashes.
-// They are loaded dynamically inside the Upload Modal now.
+// --- METADATA IMPORT ---
+// To use auto-fill locally: npm install music-metadata-browser buffer
+// then uncomment the lines below:
+// import * as mm from 'music-metadata-browser';
+// import { Buffer } from 'buffer';
+// if (typeof window !== 'undefined') {
+//   window.Buffer = window.Buffer || Buffer;
+// }
 
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
@@ -177,28 +182,6 @@ const FORMAT_DETAILS = {
 
 // --- COMPONENTS ---
 
-// MobileNav Component
-const MobileNav = ({ currentView, setCurrentView, setRequestModalOpen, setUploadModalOpen, isAdmin }) => (
-  <div className="fixed bottom-0 left-0 right-0 h-16 bg-[#121212]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around z-50 md:hidden pb-safe">
-    <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center gap-1 ${currentView === 'home' ? 'text-white' : 'text-zinc-500'}`}>
-      <Home size={20} />
-      <span className="text-[10px] font-medium">Home</span>
-    </button>
-    <button onClick={() => setCurrentView('home')} className="flex flex-col items-center gap-1 text-zinc-500">
-      <Library size={20} />
-      <span className="text-[10px] font-medium">Library</span>
-    </button>
-    <button onClick={() => setRequestModalOpen(true)} className="flex flex-col items-center gap-1 text-zinc-500">
-      <MessageSquarePlus size={20} />
-      <span className="text-[10px] font-medium">Request</span>
-    </button>
-    <button onClick={() => setUploadModalOpen(true)} className={`flex flex-col items-center gap-1 ${isAdmin ? 'text-emerald-500' : 'text-zinc-500'}`}>
-      <User size={20} />
-      <span className="text-[10px] font-medium">{isAdmin ? 'Admin' : 'Login'}</span>
-    </button>
-  </div>
-);
-
 const RequestModal = ({ isOpen, onClose, onRequest }) => {
   if (!isOpen) return null;
 
@@ -269,7 +252,7 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Reference Link (YouTube/Spotify)</label>
+            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Reference Link</label>
             <div className="relative">
               <LinkIcon className="absolute left-3 top-3.5 text-zinc-600" size={16} />
               <input 
@@ -361,7 +344,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
     }
   };
 
-  // --- AUTO-FILL HANDLER (DYNAMIC IMPORT) ---
+  // --- AUTO-FILL HANDLER ---
   const handleFileSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -458,7 +441,6 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
            </div>
           <button onClick={onClose} className="text-zinc-400 hover:text-white bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors"><X size={20} /></button>
         </div>
-        
         <div className="p-8 overflow-y-auto custom-scrollbar">
           {activeTab === 'requests' ? (
             <div className="space-y-4">
@@ -490,7 +472,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
                     <div className="p-3 bg-white/5 rounded-full"><FileAudio size={24} className="text-fuchsia-400" /></div>
                     <div>
                       <h4 className="text-sm font-bold text-white">Auto-Fill Metadata</h4>
-                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, or WAV file to instantly fill details.</p>
+                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, M4A or WAV file to instantly fill details.</p>
                     </div>
                   </div>
                   <div className="relative">
@@ -511,7 +493,6 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Title</label><input required type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="e.g. Neon Nights" /></div>
                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art</label><div className="flex gap-3"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" placeholder="Image URL..." value={formData.cover || ''} onChange={e => setFormData({...formData, cover: e.target.value})} /><div className="w-12 h-12 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0">{formData.cover ? <img src={formData.cover} className="w-full h-full object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}</div></div></div>
                 </div>
-                {/* ... other form fields ... */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                    <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Year</label><input type="number" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} /></div>
                    <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Genre</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.genre} onChange={e => setFormData({...formData, genre: e.target.value})} /></div>
