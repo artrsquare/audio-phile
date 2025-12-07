@@ -3,10 +3,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
-// --- METADATA IMPORTS (NOW ENABLED) ---
-import * as mm from 'music-metadata-browser';
+// --- METADATA & BUFFER SETUP ---
 import { Buffer } from 'buffer';
-// Ensure Buffer is available for the browser
+// Polyfill Buffer for the browser environment (needed for music-metadata)
 if (typeof window !== 'undefined') {
   window.Buffer = window.Buffer || Buffer;
 }
@@ -348,7 +347,11 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
     const lockoutUntil = parseInt(localStorage.getItem('admin_lockout_until') || '0');
     if (lockoutUntil > Date.now()) { setAuthError('Access blocked.'); return; }
     if (password === 'Ashif@Rohit') {
-      onAdminLogin(true); setAuthError(''); localStorage.removeItem('admin_failed_attempts'); localStorage.removeItem('admin_lockout_until');
+      onAdminLogin(true); 
+      setAuthError(''); 
+      localStorage.removeItem('admin_failed_attempts'); 
+      localStorage.removeItem('admin_lockout_until');
+      // Save session for 24 hours
       const expiry = Date.now() + (24 * 60 * 60 * 1000);
       localStorage.setItem('admin_session', JSON.stringify({ expiry }));
     } else {
@@ -368,7 +371,11 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
 
     setIsAutoFilling(true);
     
+    // Dynamic import to prevent crashes if module is missing
     try {
+      // DYNAMIC IMPORT: This prevents build errors if the package is missing on Vercel/Local
+      // It will only try to load when you actually drop a file.
+      const mm = await import('music-metadata-browser');
       const metadata = await mm.parseBlob(file);
       const { common, format } = metadata;
       
@@ -396,8 +403,9 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
         setFormData(prev => ({ ...prev, cover: url }));
       }
     } catch (err) {
-      console.error("Error parsing metadata:", err);
+      console.warn("Auto-fill error. Ensure 'music-metadata-browser' and 'buffer' are installed.", err);
       // Fallback
+      alert("Auto-fill failed. Please check console or enter details manually.");
     } finally {
       setIsAutoFilling(false);
     }
@@ -485,7 +493,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
                     <div className="p-3 bg-white/5 rounded-full"><FileAudio size={24} className="text-fuchsia-400" /></div>
                     <div>
                       <h4 className="text-sm font-bold text-white">Auto-Fill Metadata</h4>
-                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, M4A or WAV file to instantly fill details.</p>
+                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, or WAV file to instantly fill details.</p>
                     </div>
                   </div>
                   <div className="relative">
