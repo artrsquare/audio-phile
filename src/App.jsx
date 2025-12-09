@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 // --- FIREBASE IMPORTS ---
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+// --- STORAGE IMPORTS (NEW) ---
+import { storage } from './firebase';
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
 
 // --- METADATA IMPORTS (STATIC) ---
 import { parseBlob } from 'music-metadata-browser';
@@ -361,7 +365,9 @@ const UploadModal = ({
       M4A: '',
       WAV: '',
       MP3: ''
-    }
+    },
+  audioFile: null,
+  coverFile: null
   });
 
   // When modal first mounts, check admin lockout
@@ -436,19 +442,23 @@ const UploadModal = ({
       const previewUrl = URL.createObjectURL(file);
 
       setFormData((prev) => ({
-        ...prev,
-        // Album section
-        title: album !== 'Unknown Album' ? album : title,
-        year: year,
-        genre: genre,
-        // Artist list (replace with detected artist)
-        artists: artist === 'Unknown Artist' ? prev.artists : [artist],
-        currentArtistInput: '',
-        // First track defaults
-        currentSongTitle: title,
-        currentDuration: duration,
-        currentPreviewUrl: previewUrl
-      }));
+  ...prev,
+  // store file for upload
+  audioFile: file,
+
+  // Album section
+  title: album !== 'Unknown Album' ? album : title,
+  year: year,
+  genre: genre,
+  // Artist list (replace with detected artist)
+  artists: artist === 'Unknown Artist' ? prev.artists : [artist],
+  currentArtistInput: '',
+  // First track defaults
+  currentSongTitle: title,
+  currentDuration: duration,
+  currentPreviewUrl: previewUrl
+}));
+
 
       // Cover art from metadata (if available)
       if (common.picture && common.picture.length > 0) {
@@ -488,14 +498,16 @@ const UploadModal = ({
   };
 
   const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setFormData((prev) => ({
-        ...prev,
-        cover: URL.createObjectURL(file)
-      }));
-    }
-  };
+  const file = e.target.files[0];
+  if (!file) return;
+
+  setFormData((prev) => ({
+    ...prev,
+    cover: URL.createObjectURL(file), // for preview in the UI
+    coverFile: file                   // 🔹 for Firebase Storage upload later
+  }));
+};
+
 
   const handleAddTrack = () => {
     if (!formData.currentSongTitle) return;
@@ -531,62 +543,114 @@ const UploadModal = ({
     }));
   };
 
-  const removeTrack = (index) => {
-    setFormData((prev) => ({
-      ...prev,
-      tracks: prev.tracks.filter((_, i) => i !== index)
-    }));
-  };
+  const handleSubmit = async (e) => {
+  e.preventDefault();
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  // Start with all queued tracks
+  const allTracks = [...formData.tracks];
 
-    const allTracks = [...formData.tracks];
+  // If there's still a track in the inline fields, push it too
+  if (formData.currentSongTitle) {
+    const formats = Object.keys(formData.currentLinks).filter(
+      (key) => formData.currentLinks[key].trim() !== ''
+    );
 
-    // If there is a track in the inline fields that hasn’t been queued yet
-    if (formData.currentSongTitle) {
-      const formats = Object.keys(formData.currentLinks).filter(
-        (key) => formData.currentLinks[key].trim() !== ''
+    allTracks.push({
+      title: formData.currentSongTitle,
+      duration: formData.currentDuration,
+      previewUrl: formData.currentPreviewUrl,
+      lyrics: formData.currentLyrics,
+      links: { ...formData.currentLinks },
+      formats: formats.length > 0 ? formats : ['MP3']
+    });
+  }
+
+  // Nothing to save
+  if (allTracks.length === 0) return;
+
+  // 🔹 1) Upload audio file to Firebase Storage (if present)
+  let uploadedAudioUrl = '';
+  if (formData.audioFile) {
+    try {
+      const audioRef = ref(
+        storage,
+        `audio/${Date.now()}-${formData.audioFile.name}`
       );
-
-      allTracks.push({
-        title: formData.currentSongTitle,
-        duration: formData.currentDuration,
-        previewUrl: formData.currentPreviewUrl,
-        lyrics: formData.currentLyrics,
-        links: { ...formData.currentLinks },
-        formats: formats.length > 0 ? formats : ['MP3']
-      });
+      await uploadBytes(audioRef, formData.audioFile);
+      uploadedAudioUrl = await getDownloadURL(audioRef);
+    } catch (err) {
+      console.error('Audio upload failed:', err);
     }
+  }
 
-    if (allTracks.length === 0) return;
+  // 🔹 2) Upload cover image file to Firebase Storage (if present)
+  let uploadedCoverUrl = '';
+  if (formData.coverFile) {
+    try {
+      const coverRef = ref(
+        storage,
+        `covers/${Date.now()}-${formData.coverFile.name}`
+      );
+      await uploadBytes(coverRef, formData.coverFile);
+      uploadedCoverUrl = await getDownloadURL(coverRef);
+    } catch (err) {
+      console.error('Cover upload failed:', err);
+    }
+  }
 
-    const newAlbum = {
-      id: Date.now(),
-      title: formData.title,
-      artist: formData.artists.join(', '),
-      year: formData.year,
-      genre: formData.genre,
-      studio: formData.studio,
-      copyright: formData.copyright,
-      cover:
-        formData.cover ||
-        'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=300&h=300&fit=crop',
-      color: 'from-violet-900',
-      songs: allTracks.map((track, index) => ({
+  // 🔹 3) Decide which cover URL to store
+  const safeCover =
+    uploadedCoverUrl ||
+    (formData.cover && !formData.cover.startsWith('blob:')
+      ? formData.cover
+      : 'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=300&h=300&fit=crop');
+
+  // 🔹 4) Build the album object to send to Firestore
+  const newAlbum = {
+    id: Date.now(),
+    title: formData.title,
+    artist: formData.artists.join(', '),
+    year: formData.year,
+    genre: formData.genre,
+    studio: formData.studio,
+    copyright: formData.copyright,
+    cover: safeCover,
+    color: 'from-violet-900',
+    songs: allTracks.map((track, index) => {
+      // Cloud links as backup if no uploaded audio
+      const links = track.links || {};
+      const bestLinkFromLinks =
+        links.MP3 ||
+        links.FLAC ||
+        links.M4A ||
+        links.ALAC ||
+        links.WAV ||
+        '';
+
+      // For now: first track uses uploaded audio (if any),
+      // others fall back to links or existing previewUrl
+      const previewUrl =
+        index === 0
+          ? uploadedAudioUrl || bestLinkFromLinks || track.previewUrl || ''
+          : bestLinkFromLinks || track.previewUrl || '';
+
+      return {
         id: Date.now() + index,
         title: track.title,
         duration: track.duration,
         formats: track.formats,
         links: track.links,
         lyrics: track.lyrics,
-        previewUrl: track.previewUrl
-      }))
-    };
-
-    onUpload(newAlbum);
-    onClose();
+        previewUrl
+      };
+    })
   };
+
+  // 🔹 5) Save album through parent handler (which writes to Firestore)
+  await onUpload(newAlbum);
+  onClose();
+};
+
 
   // 🔐 LOGIN VIEW IF NOT ADMIN
   if (!isAdmin) {
