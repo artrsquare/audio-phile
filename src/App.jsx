@@ -4,16 +4,15 @@ import { db } from './firebase';
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
 // --- METADATA IMPORTS (STATIC) ---
-// Since you have installed the package, we import it directly here.
-import * as mm from 'music-metadata-browser';
+import { parseBlob } from 'music-metadata-browser';
 import { Buffer } from 'buffer';
 
 // --- BROWSER POLYFILLS ---
-// This is critical for music-metadata to work in Vite/React
 if (typeof window !== 'undefined') {
   window.Buffer = window.Buffer || Buffer;
   window.process = window.process || { env: {} };
 }
+
 
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
@@ -327,214 +326,777 @@ const RequestModal = ({ isOpen, onClose, onRequest }) => {
   );
 };
 
-const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isAdmin, onAdminLogin }) => {
-  if (!isOpen) return null;
-
+const UploadModal = ({
+  isOpen,
+  onClose,
+  onUpload,
+  requests,
+  onDeleteRequest,
+  isAdmin,
+  onAdminLogin
+}) => {
+  // 🔹 Hooks must always be at the top level (React rules)
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
-  const [activeTab, setActiveTab] = useState('upload'); 
+  const [activeTab, setActiveTab] = useState('upload');
   const [isAutoFilling, setIsAutoFilling] = useState(false);
 
   const [formData, setFormData] = useState({
-    title: '', artists: [], currentArtistInput: '', year: '', genre: '',
-    studio: '', copyright: '', cover: null, tracks: [],
-    currentSongTitle: '', currentDuration: '3:00', currentPreviewUrl: '',
-    currentLyrics: '', currentLinks: { FLAC: '', ALAC: '', M4A: '', WAV: '', MP3: '' }
+    title: '',
+    artists: [],
+    currentArtistInput: '',
+    year: '',
+    genre: '',
+    studio: '',
+    copyright: '',
+    cover: null,
+    tracks: [],
+    currentSongTitle: '',
+    currentDuration: '3:00',
+    currentPreviewUrl: '',
+    currentLyrics: '',
+    currentLinks: {
+      FLAC: '',
+      ALAC: '',
+      M4A: '',
+      WAV: '',
+      MP3: ''
+    }
   });
 
+  // When modal first mounts, check admin lockout
   useEffect(() => {
     const lockoutUntil = localStorage.getItem('admin_lockout_until');
-    if (lockoutUntil && parseInt(lockoutUntil) > Date.now()) setAuthError('Access blocked.');
+    if (lockoutUntil && parseInt(lockoutUntil) > Date.now()) {
+      setAuthError('Access blocked.');
+    }
   }, []);
+
+  if (!isOpen) return null;
 
   const handleLogin = (e) => {
     e.preventDefault();
     const lockoutUntil = parseInt(localStorage.getItem('admin_lockout_until') || '0');
-    if (lockoutUntil > Date.now()) { setAuthError('Access blocked.'); return; }
+    if (lockoutUntil > Date.now()) {
+      setAuthError('Access blocked.');
+      return;
+    }
     if (password === 'Ashif@Rohit') {
-      onAdminLogin(true); 
-      setAuthError(''); 
-      localStorage.removeItem('admin_failed_attempts'); 
+      onAdminLogin(true);
+      setAuthError('');
+      localStorage.removeItem('admin_failed_attempts');
       localStorage.removeItem('admin_lockout_until');
+
       // Save session for 24 hours
-      const expiry = Date.now() + (24 * 60 * 60 * 1000);
+      const expiry = Date.now() + 24 * 60 * 60 * 1000;
       localStorage.setItem('admin_session', JSON.stringify({ expiry }));
     } else {
       const attempts = parseInt(localStorage.getItem('admin_failed_attempts') || '0') + 1;
       localStorage.setItem('admin_failed_attempts', attempts.toString());
       if (attempts >= 5) {
-        localStorage.setItem('admin_lockout_until', (Date.now() + 172800000).toString());
+        localStorage.setItem(
+          'admin_lockout_until',
+          (Date.now() + 172800000).toString()
+        );
         setAuthError('Blocked for 2 days.');
-      } else { setAuthError(`Incorrect. ${5 - attempts} attempts left.`); }
+      } else {
+        setAuthError(`Incorrect. ${5 - attempts} attempts left.`);
+      }
     }
   };
 
-  // --- AUTO-FILL HANDLER ---
+  // 🔹 AUTO-FILL HANDLER: reads metadata from the audio file
   const handleFileSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setIsAutoFilling(true);
-    
-    try {
-      const metadata = await mm.parseBlob(file);
-      const { common, format } = metadata;
-      
-      const title = common.title || file.name.replace(/\.[^/.]+$/, "");
-      const artist = common.artist || "Unknown Artist";
-      const album = common.album || "Unknown Album";
-      const year = common.year || new Date().getFullYear();
-      const duration = format.duration ? formatDuration(format.duration) : "3:00";
-      const genre = common.genre && common.genre[0] ? common.genre[0] : "";
 
-      setFormData(prev => ({
+    try {
+      // Use music-metadata-browser
+      const metadata = await parseBlob(file);
+      const { common, format } = metadata;
+
+      // Basic fields
+      const title =
+        common.title || file.name.replace(/\.[^/.]+$/, '');
+      const artist = common.artist || 'Unknown Artist';
+      const album = common.album || 'Unknown Album';
+      const year =
+        common.year || new Date().getFullYear();
+      const genre =
+        common.genre && common.genre[0] ? common.genre[0] : '';
+
+      // Duration → mm:ss (using your global formatDuration util)
+      const duration = format.duration
+        ? formatDuration(format.duration)
+        : '3:00';
+
+      // Local preview URL from the file itself
+      const previewUrl = URL.createObjectURL(file);
+
+      setFormData((prev) => ({
         ...prev,
-        title: album !== "Unknown Album" ? album : title,
-        artists: [artist],
+        // Album section
+        title: album !== 'Unknown Album' ? album : title,
         year: year,
         genre: genre,
+        // Artist list (replace with detected artist)
+        artists: artist === 'Unknown Artist' ? prev.artists : [artist],
+        currentArtistInput: '',
+        // First track defaults
         currentSongTitle: title,
-        currentDuration: duration
+        currentDuration: duration,
+        currentPreviewUrl: previewUrl
       }));
 
+      // Cover art from metadata (if available)
       if (common.picture && common.picture.length > 0) {
         const picture = common.picture[0];
         const blob = new Blob([picture.data], { type: picture.format });
         const url = URL.createObjectURL(blob);
-        setFormData(prev => ({ ...prev, cover: url }));
+        setFormData((prev) => ({
+          ...prev,
+          cover: url
+        }));
       }
     } catch (err) {
-      console.error("Error parsing metadata:", err);
-      // Fail safely
+      console.error('Error parsing metadata:', err);
+      alert(
+        'Auto-fill failed while reading metadata. Check console for technical details.'
+      );
     } finally {
       setIsAutoFilling(false);
     }
   };
 
-  const handleAddArtist = () => { if (formData.currentArtistInput.trim()) setFormData(prev => ({ ...prev, artists: [...prev.artists, prev.currentArtistInput.trim()], currentArtistInput: '' })); };
-  const removeArtist = (index) => { setFormData(prev => ({ ...prev, artists: prev.artists.filter((_, i) => i !== index) })); };
-  const handleImageUpload = (e) => { const file = e.target.files[0]; if (file) setFormData(prev => ({ ...prev, cover: URL.createObjectURL(file) })); };
-  const handleAddTrack = () => {
-    if (!formData.currentSongTitle) return;
-    const formats = Object.keys(formData.currentLinks).filter(key => formData.currentLinks[key].trim() !== '');
-    setFormData(prev => ({
-      ...prev, tracks: [...prev.tracks, { title: prev.currentSongTitle, duration: prev.currentDuration, previewUrl: prev.currentPreviewUrl, lyrics: prev.currentLyrics, links: { ...prev.currentLinks }, formats: formats.length > 0 ? formats : ['MP3'] }],
-      currentSongTitle: '', currentDuration: '3:00', currentPreviewUrl: '', currentLyrics: '', currentLinks: { FLAC: '', ALAC: '', M4A: '', WAV: '', MP3: '' }
-    }));
-  };
-  const removeTrack = (index) => { setFormData(prev => ({ ...prev, tracks: prev.tracks.filter((_, i) => i !== index) })); };
-  const handleSubmit = (e) => {
-    e.preventDefault(); const allTracks = [...formData.tracks];
-    if (formData.currentSongTitle) {
-      const formats = Object.keys(formData.currentLinks).filter(key => formData.currentLinks[key].trim() !== '');
-      allTracks.push({ title: formData.currentSongTitle, duration: formData.currentDuration, previewUrl: formData.currentPreviewUrl, lyrics: formData.currentLyrics, links: { ...formData.currentLinks }, formats: formats.length > 0 ? formats : ['MP3'] });
+  const handleAddArtist = () => {
+    if (formData.currentArtistInput.trim()) {
+      setFormData((prev) => ({
+        ...prev,
+        artists: [...prev.artists, prev.currentArtistInput.trim()],
+        currentArtistInput: ''
+      }));
     }
-    if (allTracks.length === 0) return;
-    const newAlbum = { id: Date.now(), title: formData.title, artist: formData.artists.join(', '), year: formData.year, genre: formData.genre, studio: formData.studio, copyright: formData.copyright, cover: formData.cover || "https://images.unsplash.com/photo-1506157786151-b8491531f063?w=300&h=300&fit=crop", color: "from-violet-900", songs: allTracks.map((track, index) => ({ id: Date.now() + index, title: track.title, duration: track.duration, formats: track.formats, links: track.links, lyrics: track.lyrics, previewUrl: track.previewUrl })) };
-    onUpload(newAlbum); onClose();
   };
 
+  const removeArtist = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      artists: prev.artists.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFormData((prev) => ({
+        ...prev,
+        cover: URL.createObjectURL(file)
+      }));
+    }
+  };
+
+  const handleAddTrack = () => {
+    if (!formData.currentSongTitle) return;
+
+    const formats = Object.keys(formData.currentLinks).filter(
+      (key) => formData.currentLinks[key].trim() !== ''
+    );
+
+    setFormData((prev) => ({
+      ...prev,
+      tracks: [
+        ...prev.tracks,
+        {
+          title: prev.currentSongTitle,
+          duration: prev.currentDuration,
+          previewUrl: prev.currentPreviewUrl,
+          lyrics: prev.currentLyrics,
+          links: { ...prev.currentLinks },
+          formats: formats.length > 0 ? formats : ['MP3']
+        }
+      ],
+      currentSongTitle: '',
+      currentDuration: '3:00',
+      currentPreviewUrl: '',
+      currentLyrics: '',
+      currentLinks: {
+        FLAC: '',
+        ALAC: '',
+        M4A: '',
+        WAV: '',
+        MP3: ''
+      }
+    }));
+  };
+
+  const removeTrack = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      tracks: prev.tracks.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    const allTracks = [...formData.tracks];
+
+    // If there is a track in the inline fields that hasn’t been queued yet
+    if (formData.currentSongTitle) {
+      const formats = Object.keys(formData.currentLinks).filter(
+        (key) => formData.currentLinks[key].trim() !== ''
+      );
+
+      allTracks.push({
+        title: formData.currentSongTitle,
+        duration: formData.currentDuration,
+        previewUrl: formData.currentPreviewUrl,
+        lyrics: formData.currentLyrics,
+        links: { ...formData.currentLinks },
+        formats: formats.length > 0 ? formats : ['MP3']
+      });
+    }
+
+    if (allTracks.length === 0) return;
+
+    const newAlbum = {
+      id: Date.now(),
+      title: formData.title,
+      artist: formData.artists.join(', '),
+      year: formData.year,
+      genre: formData.genre,
+      studio: formData.studio,
+      copyright: formData.copyright,
+      cover:
+        formData.cover ||
+        'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=300&h=300&fit=crop',
+      color: 'from-violet-900',
+      songs: allTracks.map((track, index) => ({
+        id: Date.now() + index,
+        title: track.title,
+        duration: track.duration,
+        formats: track.formats,
+        links: track.links,
+        lyrics: track.lyrics,
+        previewUrl: track.previewUrl
+      }))
+    };
+
+    onUpload(newAlbum);
+    onClose();
+  };
+
+  // 🔐 LOGIN VIEW IF NOT ADMIN
   if (!isAdmin) {
     return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
-        <div className="bg-[#0f0f11] border border-white/10 p-8 rounded-3xl w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div
+        className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200"
+        onClick={onClose}
+      >
+        <div
+          className="bg-[#0f0f11] border border-white/10 p-8 rounded-3xl w-full max-w-sm shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="flex flex-col items-center gap-5 mb-8">
-            <div className="bg-violet-500/10 p-5 rounded-full ring-1 ring-violet-500/20"><Lock className="text-violet-400" size={32} /></div>
-            <div className="text-center"><h3 className="text-2xl font-bold text-white mb-1">Creator Studio</h3><p className="text-zinc-400 text-sm">Secure access point for admins.</p></div>
+            <div className="bg-violet-500/10 p-5 rounded-full ring-1 ring-violet-500/20">
+              <Lock className="text-violet-400" size={32} />
+            </div>
+            <div className="text-center">
+              <h3 className="text-2xl font-bold text-white mb-1">
+                Creator Studio
+              </h3>
+              <p className="text-zinc-400 text-sm">
+                Secure access point for admins.
+              </p>
+            </div>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
-            <input type="password" autoFocus className={`w-full bg-white/5 border ${authError ? 'border-red-500/50' : 'border-white/10'} rounded-xl p-3 text-white text-center tracking-widest focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/50 transition-all`} placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
-            {authError && <p className="text-red-400 text-xs text-center font-medium">{authError}</p>}
-            <button type="submit" className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-gray-200 transition-colors mt-2 shadow-lg">Authenticate</button>
+            <input
+              type="password"
+              autoFocus
+              className={`w-full bg-white/5 border ${
+                authError ? 'border-red-500/50' : 'border-white/10'
+              } rounded-xl p-3 text-white text-center tracking-widest focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/50 transition-all`}
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            {authError && (
+              <p className="text-red-400 text-xs text-center font-medium">
+                {authError}
+              </p>
+            )}
+            <button
+              type="submit"
+              className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-gray-200 transition-colors mt-2 shadow-lg"
+            >
+              Authenticate
+            </button>
           </form>
         </div>
       </div>
     );
   }
 
+  // 🔊 MAIN UPLOAD UI (when admin)
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
-      <div className="bg-[#0f0f11] border border-white/10 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#0f0f11] border border-white/10 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header Tabs */}
         <div className="p-6 border-b border-white/5 flex justify-between items-center shrink-0 bg-white/[0.02]">
-           <div className="flex items-center gap-4">
-             <button onClick={() => setActiveTab('upload')} className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors ${activeTab === 'upload' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}>Upload Music</button>
-             <button onClick={() => setActiveTab('requests')} className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${activeTab === 'requests' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}>Audience Requests {requests.length > 0 && <span className="bg-fuchsia-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{requests.length}</span>}</button>
-           </div>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors"><X size={20} /></button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setActiveTab('upload')}
+              className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors ${
+                activeTab === 'upload'
+                  ? 'bg-white/10 text-white'
+                  : 'text-zinc-500 hover:text-white'
+              }`}
+            >
+              Upload Music
+            </button>
+            <button
+              onClick={() => setActiveTab('requests')}
+              className={`text-sm font-bold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                activeTab === 'requests'
+                  ? 'bg-white/10 text-white'
+                  : 'text-zinc-500 hover:text-white'
+              }`}
+            >
+              Audience Requests
+              {requests.length > 0 && (
+                <span className="bg-fuchsia-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                  {requests.length}
+                </span>
+              )}
+            </button>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors"
+          >
+            <X size={20} />
+          </button>
         </div>
+
+        {/* Content */}
         <div className="p-8 overflow-y-auto custom-scrollbar">
+          {/* Requests TAB */}
           {activeTab === 'requests' ? (
             <div className="space-y-4">
               {requests.length === 0 ? (
-                <div className="text-center py-12 text-zinc-500 flex flex-col items-center gap-3"><Inbox size={48} className="opacity-20" /><p>No pending requests.</p></div>
+                <div className="text-center py-12 text-zinc-500 flex flex-col items-center gap-3">
+                  <Inbox size={48} className="opacity-20" />
+                  <p>No pending requests.</p>
+                </div>
               ) : (
-                requests.map(req => (
-                  <div key={req.id} className="bg-white/5 border border-white/5 rounded-2xl p-5 flex items-start justify-between hover:bg-white/10 transition-colors group">
+                requests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="bg-white/5 border border-white/5 rounded-2xl p-5 flex items-start justify-between hover:bg-white/10 transition-colors group"
+                  >
                     <div className="flex-1 min-w-0 mr-4">
-                      <div className="flex items-center gap-3 mb-2"><span className="text-lg font-bold text-white">{req.title}</span><span className="text-xs bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded border border-fuchsia-500/30 font-bold">{req.quality}</span></div>
-                      <div className="text-sm text-zinc-400 font-medium mb-1">Artist: <span className="text-zinc-200">{req.artist}</span></div>
-                      {req.album && <div className="text-sm text-zinc-400 font-medium mb-1">Album: <span className="text-zinc-200">{req.album}</span></div>}
-                      {req.notes && <div className="text-sm text-zinc-500 mt-3 p-3 bg-black/20 rounded-lg italic border border-white/5">"{req.notes}"</div>}
-                      {req.link && (<a href={req.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-xs text-emerald-400 mt-3 hover:underline font-bold"><LinkIcon size={12} /> Reference Link</a>)}
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-lg font-bold text-white">
+                          {req.title}
+                        </span>
+                        <span className="text-xs bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded border border-fuchsia-500/30 font-bold">
+                          {req.quality}
+                        </span>
+                      </div>
+                      <div className="text-sm text-zinc-400 font-medium mb-1">
+                        Artist:{' '}
+                        <span className="text-zinc-200">{req.artist}</span>
+                      </div>
+                      {req.album && (
+                        <div className="text-sm text-zinc-400 font-medium mb-1">
+                          Album:{' '}
+                          <span className="text-zinc-200">{req.album}</span>
+                        </div>
+                      )}
+                      {req.notes && (
+                        <div className="text-sm text-zinc-500 mt-3 p-3 bg-black/20 rounded-lg italic border border-white/5">
+                          "{req.notes}"
+                        </div>
+                      )}
+                      {req.link && (
+                        <a
+                          href={req.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-xs text-emerald-400 mt-3 hover:underline font-bold"
+                        >
+                          <LinkIcon size={12} /> Reference Link
+                        </a>
+                      )}
                     </div>
                     <div className="flex flex-col gap-2">
-                      <button onClick={() => onDeleteRequest(req.id)} className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-colors" title="Delete Request"><Trash2 size={18} /></button>
+                      <button
+                        onClick={() => onDeleteRequest(req.id)}
+                        className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                        title="Delete Request"
+                      >
+                        <Trash2 size={18} />
+                      </button>
                     </div>
                   </div>
                 ))
               )}
             </div>
           ) : (
+            // UPLOAD TAB
             <form onSubmit={handleSubmit} className="space-y-8">
               {/* MAGIC AUTO-FILL SECTION */}
               <div className="bg-gradient-to-r from-violet-900/40 to-fuchsia-900/40 p-1 rounded-2xl border border-white/10 mb-6">
                 <div className="bg-[#18181b] rounded-xl p-4 flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="p-3 bg-white/5 rounded-full"><FileAudio size={24} className="text-fuchsia-400" /></div>
+                    <div className="p-3 bg-white/5 rounded-full">
+                      <FileAudio
+                        size={24}
+                        className="text-fuchsia-400"
+                      />
+                    </div>
                     <div>
-                      <h4 className="text-sm font-bold text-white">Auto-Fill Metadata</h4>
-                      <p className="text-xs text-zinc-400">Drop an MP3, FLAC, or WAV file to instantly fill details.</p>
+                      <h4 className="text-sm font-bold text-white">
+                        Auto-Fill Metadata
+                      </h4>
+                      <p className="text-xs text-zinc-400">
+                        Drop an MP3, FLAC, or WAV file to instantly
+                        fill details.
+                      </p>
                     </div>
                   </div>
                   <div className="relative">
-                     {/* Updated accept attribute for all formats */}
-                     <input type="file" accept=".mp3,.wav,.flac,.m4a,.alac,.aac,.ogg,audio/*" onChange={handleFileSelect} className="absolute inset-0 opacity-0 cursor-pointer" />
-                     <button type="button" className="bg-white text-black text-xs font-bold px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors flex items-center gap-2">
-                        {isAutoFilling ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14} />} 
-                        {isAutoFilling ? 'Scanning...' : 'Select File'}
-                     </button>
+                    <input
+                      type="file"
+                      accept=".mp3,.wav,.flac,.m4a,.alac,.aac,.ogg,audio/*"
+                      onChange={handleFileSelect}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <button
+                      type="button"
+                      className="bg-white text-black text-xs font-bold px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors flex items-center gap-2"
+                    >
+                      {isAutoFilling ? (
+                        <Loader2
+                          size={14}
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <Sparkles size={14} />
+                      )}
+                      {isAutoFilling ? 'Scanning...' : 'Select File'}
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Metadata Section */}
+              {/* METADATA SECTION */}
               <div className="space-y-6">
-                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Disc size={14}/> Album Metadata</h4>
+                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Disc size={14} /> Album Metadata
+                </h4>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Title</label><input required type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="e.g. Neon Nights" /></div>
-                  <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art</label><div className="flex gap-3"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors" placeholder="Image URL..." value={formData.cover || ''} onChange={e => setFormData({...formData, cover: e.target.value})} /><div className="w-12 h-12 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0">{formData.cover ? <img src={formData.cover} className="w-full h-full object-cover"/> : <ImageIcon size={16} className="text-zinc-600"/>}</div></div></div>
+                  {/* Title */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Title
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors"
+                      value={formData.title}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          title: e.target.value
+                        }))
+                      }
+                      placeholder="e.g. Neon Nights"
+                    />
+                  </div>
+
+                  {/* Cover */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Cover Art
+                    </label>
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none transition-colors"
+                        placeholder="Image URL..."
+                        value={formData.cover || ''}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            cover: e.target.value
+                          }))
+                        }
+                      />
+                      <label className="w-12 h-12 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0 cursor-pointer">
+                        {formData.cover ? (
+                          <img
+                            src={formData.cover}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <ImageIcon
+                            size={16}
+                            className="text-zinc-600"
+                          />
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleImageUpload}
+                        />
+                      </label>
+                    </div>
+                  </div>
                 </div>
-                {/* ... other form fields ... */}
+
+                {/* Year / Genre / Artist */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Year</label><input type="number" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} /></div>
-                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Genre</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.genre} onChange={e => setFormData({...formData, genre: e.target.value})} /></div>
-                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Artist</label><div className="flex gap-2"><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentArtistInput} onChange={e => setFormData({...formData, currentArtistInput: e.target.value})} placeholder="Name" /><button type="button" onClick={handleAddArtist} className="bg-white/5 border border-white/10 px-3 rounded-xl hover:bg-white/10"><Plus size={18} className="text-zinc-300"/></button></div></div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Year
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none"
+                      value={formData.year}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          year: e.target.value
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Genre
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none"
+                      value={formData.genre}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          genre: e.target.value
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Artist
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none"
+                        value={formData.currentArtistInput}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            currentArtistInput: e.target.value
+                          }))
+                        }
+                        placeholder="Name"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddArtist}
+                        className="bg-white/5 border border-white/10 px-3 rounded-xl hover:bg-white/10"
+                      >
+                        <Plus
+                          size={18}
+                          className="text-zinc-300"
+                        />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">{formData.artists.map((artist, i) => (<span key={i} className="bg-violet-500/10 text-violet-300 border border-violet-500/20 px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2">{artist} <button type="button" onClick={() => removeArtist(i)} className="hover:text-white"><X size={12}/></button></span>))}</div>
+
+                {/* Artist chips */}
+                <div className="flex flex-wrap gap-2">
+                  {formData.artists.map((artist, i) => (
+                    <span
+                      key={i}
+                      className="bg-violet-500/10 text-violet-300 border border-violet-500/20 px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2"
+                    >
+                      {artist}
+                      <button
+                        type="button"
+                        onClick={() => removeArtist(i)}
+                        className="hover:text-white"
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               </div>
+
               <hr className="border-white/5" />
-              {/* Track Section */}
+
+              {/* TRACK SECTION */}
               <div className="space-y-6">
-                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Music size={14}/> Track Management</h4>
-                {formData.tracks.length > 0 && (<div className="space-y-2 mb-6 bg-white/5 p-4 rounded-2xl border border-white/5">{formData.tracks.map((t, i) => (<div key={i} className="flex justify-between items-center text-sm py-1"><span className="text-zinc-300 flex items-center gap-3"><span className="text-zinc-600 font-mono text-xs">{i+1}</span> {t.title}</span><div className="flex items-center gap-4"><div className="flex gap-1">{t.formats.map(f => <span key={f} className="text-[9px] bg-black/30 px-2 py-0.5 rounded-full text-zinc-400 border border-white/5">{f}</span>)}</div><button type="button" onClick={() => removeTrack(i)} className="text-zinc-600 hover:text-red-400"><Trash2 size={14}/></button></div></div>))}</div>)}
+                <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Music size={14} /> Track Management
+                </h4>
+
+                {/* Existing queued tracks */}
+                {formData.tracks.length > 0 && (
+                  <div className="space-y-2 mb-6 bg-white/5 p-4 rounded-2xl border border-white/5">
+                    {formData.tracks.map((t, i) => (
+                      <div
+                        key={i}
+                        className="flex justify-between items-center text-sm py-1"
+                      >
+                        <span className="text-zinc-300 flex items-center gap-3">
+                          <span className="text-zinc-600 font-mono text-xs">
+                            {i + 1}
+                          </span>
+                          {t.title}
+                        </span>
+                        <div className="flex items-center gap-4">
+                          <div className="flex gap-1">
+                            {t.formats.map((f) => (
+                              <span
+                                key={f}
+                                className="text-[9px] bg-black/30 px-2 py-0.5 rounded-full text-zinc-400 border border-white/5"
+                              >
+                                {f}
+                              </span>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeTrack(i)}
+                            className="text-zinc-600 hover:text-red-400"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Inline track editor */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
-                   <div className="col-span-1 sm:col-span-3 space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Track Title</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentSongTitle} onChange={e => setFormData({...formData, currentSongTitle: e.target.value})} placeholder="Song Name" /></div>
-                   <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Time</label><input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none" value={formData.currentDuration} onChange={e => setFormData({...formData, currentDuration: e.target.value})} /></div>
+                  <div className="col-span-1 sm:col-span-3 space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Track Title
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none"
+                      value={formData.currentSongTitle}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          currentSongTitle: e.target.value
+                        }))
+                      }
+                      placeholder="Song Name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                      Time
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500/50 focus:outline-none"
+                      value={formData.currentDuration}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          currentDuration: e.target.value
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2"><label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cloud Links (Optional)</label><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{Object.keys(formData.currentLinks).map(fmt => (<div key={fmt} className="flex items-center gap-2"><div className="w-12 text-[10px] font-bold text-center bg-white/5 py-2 rounded-lg text-zinc-400 border border-white/5">{fmt}</div><input type="text" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-violet-500/50 focus:outline-none" placeholder="Link..." value={formData.currentLinks[fmt]} onChange={e => setFormData(prev => ({...prev, currentLinks: {...prev.currentLinks, [fmt]: e.target.value}}))} /></div>))}</div></div>
-                <div className="flex justify-end pt-2"><button type="button" onClick={handleAddTrack} disabled={!formData.currentSongTitle} className="bg-white/10 hover:bg-white/15 text-white px-6 py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-white/5">+ Add to Queue</button></div>
+
+                {/* Cloud links */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                    Cloud Links (Optional)
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {Object.keys(formData.currentLinks).map((fmt) => (
+                      <div
+                        key={fmt}
+                        className="flex items-center gap-2"
+                      >
+                        <div className="w-12 text-[10px] font-bold text-center bg-white/5 py-2 rounded-lg text-zinc-400 border border-white/5">
+                          {fmt}
+                        </div>
+                        <input
+                          type="text"
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-violet-500/50 focus:outline-none"
+                          placeholder="Link..."
+                          value={formData.currentLinks[fmt]}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              currentLinks: {
+                                ...prev.currentLinks,
+                                [fmt]: e.target.value
+                              }
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={handleAddTrack}
+                    disabled={!formData.currentSongTitle}
+                    className="bg-white/10 hover:bg-white/15 text-white px-6 py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-white/5"
+                  >
+                    + Add to Queue
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-4 pt-4"><button type="button" onClick={onClose} className="flex-1 py-3.5 rounded-xl text-zinc-400 font-bold hover:bg-white/5 transition-colors">Cancel</button><button type="submit" className="flex-[2] py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-bold transition-all shadow-lg shadow-violet-500/20 transform hover:-translate-y-0.5">Publish Release</button></div>
+
+              {/* Footer buttons */}
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-3.5 rounded-xl text-zinc-400 font-bold hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[2] py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-bold transition-all shadow-lg shadow-violet-500/20 transform hover:-translate-y-0.5"
+                >
+                  Publish Release
+                </button>
+              </div>
             </form>
           )}
         </div>
@@ -542,6 +1104,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
     </div>
   );
 };
+
 
 // ... (AIModal & DownloadModal reuse existing)
 const AIModal = ({ isOpen, onClose, title, content, isLoading, type }) => {
