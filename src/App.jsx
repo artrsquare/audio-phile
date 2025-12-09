@@ -3,14 +3,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase'; 
 import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
-// --- METADATA IMPORT (UNCOMMENT TO ENABLE AUTO-FILL) ---
-// 1. Run: npm install music-metadata-browser buffer
-// 2. Uncomment the lines below:
-// import * as mm from 'music-metadata-browser';
-// import { Buffer } from 'buffer';
-// if (typeof window !== 'undefined') {
-//   window.Buffer = window.Buffer || Buffer;
-// }
+// --- METADATA IMPORTS (STATIC) ---
+// Since you have installed the package, we import it directly here.
+import * as mm from 'music-metadata-browser';
+import { Buffer } from 'buffer';
+
+// --- BROWSER POLYFILLS ---
+// This is critical for music-metadata to work in Vite/React
+if (typeof window !== 'undefined') {
+  window.Buffer = window.Buffer || Buffer;
+  window.process = window.process || { env: {} };
+}
 
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
@@ -182,6 +185,28 @@ const FORMAT_DETAILS = {
 
 // --- COMPONENTS ---
 
+// MobileNav Component
+const MobileNav = ({ currentView, setCurrentView, setRequestModalOpen, setUploadModalOpen, isAdmin }) => (
+  <div className="fixed bottom-0 left-0 right-0 h-16 bg-[#121212]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around z-50 md:hidden pb-safe">
+    <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center gap-1 ${currentView === 'home' ? 'text-white' : 'text-zinc-500'}`}>
+      <Home size={20} />
+      <span className="text-[10px] font-medium">Home</span>
+    </button>
+    <button onClick={() => setCurrentView('home')} className="flex flex-col items-center gap-1 text-zinc-500">
+      <Library size={20} />
+      <span className="text-[10px] font-medium">Library</span>
+    </button>
+    <button onClick={() => setRequestModalOpen(true)} className="flex flex-col items-center gap-1 text-zinc-500">
+      <MessageSquarePlus size={20} />
+      <span className="text-[10px] font-medium">Request</span>
+    </button>
+    <button onClick={() => setUploadModalOpen(true)} className={`flex flex-col items-center gap-1 ${isAdmin ? 'text-emerald-500' : 'text-zinc-500'}`}>
+      <User size={20} />
+      <span className="text-[10px] font-medium">{isAdmin ? 'Admin' : 'Login'}</span>
+    </button>
+  </div>
+);
+
 const RequestModal = ({ isOpen, onClose, onRequest }) => {
   if (!isOpen) return null;
 
@@ -351,12 +376,7 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
 
     setIsAutoFilling(true);
     
-    // Check if libraries are available before using them
     try {
-      if (typeof mm === 'undefined' || !mm.parseBlob) {
-        throw new Error("Metadata library not loaded. Ensure npm modules are installed and imports uncommented.");
-      }
-
       const metadata = await mm.parseBlob(file);
       const { common, format } = metadata;
       
@@ -384,8 +404,8 @@ const UploadModal = ({ isOpen, onClose, onUpload, requests, onDeleteRequest, isA
         setFormData(prev => ({ ...prev, cover: url }));
       }
     } catch (err) {
-      console.warn("Auto-fill error:", err);
-      alert("Auto-fill failed. Please ensure 'music-metadata-browser' is installed locally.");
+      console.error("Error parsing metadata:", err);
+      // Fail safely
     } finally {
       setIsAutoFilling(false);
     }
